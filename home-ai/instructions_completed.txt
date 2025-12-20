@@ -1,0 +1,10 @@
+TASK: Convert relative config paths into absolute ones.
+
+STEPS:
+1. Open agent.py, model.py, and memory.py.
+2. At the top of each file, add:
+      import os, pathlib
+3. Replace the config_path logic with:
+      config_path = os.path.join(os.path.dirname(__file__), config_path)
+4. Do NOT modify any other logic.
+5. Show me full updated files.

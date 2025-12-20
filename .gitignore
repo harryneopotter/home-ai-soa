@@ -1,0 +1,123 @@
+# Git ignore patterns for home-ai projects
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python-build/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Local data
+data/raw/
+data/processed/
+outputs/
+reports/
+*.json
+*.csv
+*.xlsx
+*.pdf
+
+# Models and large files
+models/
+*.bin
+*.safetensors
+*.gguf
+*.model
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Node.js (if any)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Cache
+.cache/
+*.cache
+
+# Configuration (keep local)
+config.local.yaml
+.env.local
+secrets.yaml
+
+# Backup files
+*.bak
+*.backup
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Documentation build
+docs/_build/
+
+# Specific to home-ai
+# Keep git directory but ignore nested repos
+RemAssist/session.json
+session*.json
+agent_*.log
+
+# Ignore large model files that might be downloaded
+*.ggml*
+*.llama*
+*.model.*
