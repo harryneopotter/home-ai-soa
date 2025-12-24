@@ -1,73 +1,130 @@
-# 📋 Next Tasks
+# 📋 RemAssist — Unified Task Queue
+*Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-## 🎯 Immediate Tasks
+_Last updated: December 23, 2025_
 
-### 1. **Test and Verify Current System** ✅
-- [x] Verify secure_webui.py is working on port 8080
-- [x] Document template issues with main.py
-- [x] Preserve all files as requested
+---
 
-### 2. **Documentation** ✅
-- [x] Create TEMPLATE_ISSUES.md
-- [x] Update SERVICES_CONFIG.md with current state
-- [x] Document what's working vs what's not
+## 🔍 Current System Snapshot
+- **✅ Working:** `secure_webui.py` on port 8080, API endpoints, basic monitoring stack, remote access (Tailscale + fixed port 8080), agent_webui-based interaction UI, services monitor dashboard.
+- **⚠️ Needs Attention:** `main.py` templates (Jinja2/CSS conflicts), advanced features (multi-user auth, PDF upload flows in UI), PulseAudio stability, production security hardening.
+- **🆕 New Requirements:** Finance Intelligence MVP (v2) build-out, Merchant Intelligence Dictionary for recurring statement terms, per-user data isolation for household deployments.
 
-## 🎯 Future Tasks
+---
 
-### 1. **Fix main.py Templates** ⚠️
-- Research Jinja2/CSS conflict solutions
-- Consider using external CSS files
-- Or use different template engine
-- Or rewrite templates completely
+## 🚀 Immediate Priority Tasks
+### 1. PulseAudio Stability Resolution
+- [ ] Restart PulseAudio service cleanly and verify no respawn loops
+- [ ] Inspect audio device conflicts / permissions
+- [ ] Run end-to-end audio output test (TTS → speakers)
+- [ ] Collect logs for regression tracking
 
-### 2. **Enhance Web UI** 📋
-- Add PDF processing to agent_webui.py
-- Implement service control features
-- Add more monitoring capabilities
-- Improve user interface
+### 2. TTS System Validation
+- [ ] Download & cache VibeVoice model (>500 MB)
+- [ ] Exercise VibeVoice TTS in isolation
+- [ ] Verify API TTS endpoints (success + error cases)
+- [ ] Document audio troubleshooting checklist
 
-### 3. **System Improvements** 📋
-- Add more error handling
-- Implement rate limiting
-- Enhance logging
-- Add security features
+### 3. Remote Access & Web UI Verification
+- [ ] Re-test setup script in sandbox
+- [ ] Reconfirm Tailscale link + IP whitelist (100.84.92.33)
+- [ ] Validate service monitor dashboard & agent web UI end-to-end
+- [ ] Configure Nginx for remote access (Ready to Run)
+- [ ] Finalize design templates (monitoring + chat)
+- [ ] Produce services configuration addendum
 
-## 🎯 Long-term Goals
+---
 
-### 1. **Production Ready** 📋
-- Fix all template issues
-- Test thoroughly
-- Document completely
-- Deploy with confidence
+## 🧠 Finance Intelligence MVP (v2) Build Queue
+Refer to `FINANCE_MVP_PLAN_V2.md` for full spec. Key execution tasks:
 
-### 2. **Feature Complete** 📋
-- PDF processing
-- Service management
-- Advanced monitoring
-- User authentication
+### A. Day 0 / Prep (Status)
+- [x] Document refreshed plan (hardware, models, household requirements)
+- [ ] Stand up `finance-agent/` structure + venv
 
-### 3. **Maintenance** 📋
-- Regular updates
-- Bug fixes
-- Documentation
-- Testing
+### B. Stage 1 — Foundation
+- [ ] Implement `src/storage.py` (SQLite schema, merchant dictionary tables, user ownership metadata)
+- [ ] Implement `src/models.py` (async Ollama clients pinned to GPU 0/1)
+- [ ] Insert mock transaction + verify both models respond
 
-## 🎯 Current Status
+### C. Stage 2 — Extraction Engine
+- [ ] Build `src/parser.py` with staged awareness (`get_identity_context`, `get_structural_summary`, `extract_transactions`)
+- [ ] Add Apple Card / Chase regex patterns + Nemotron fallback
+- [ ] Wire Merchant Intelligence Dictionary lookups before LLM calls
 
-**Working:**
-- ✅ secure_webui.py (port 8080)
-- ✅ API endpoints
-- ✅ Basic monitoring
+### D. Stage 3 — Interleaved Orchestrator
+- [ ] Implement `src/orchestrator.py` state machine streaming Stage 1→3 context to Nemotron
+- [ ] Add per-user session routing + household access controls
+- [ ] Generate `transactions.json` / `analysis.json` per user for `soa_dashboard.html`
 
-**Needs Work:**
-- ⚠️ main.py templates
-- ⚠️ Advanced features
+### E. Post-MVP Safeguards
+- [ ] Build role-based sharing rules (primary admin vs household member)
+- [ ] Implement dictionary maintenance utility (promote high-confidence mappings, flag conflicts)
+- [ ] Prepare sample data + demo script highlighting staged awareness UX
 
-**Documented:**
-- ✅ TEMPLATE_ISSUES.md
-- ✅ SERVICES_CONFIG.md
-- ✅ NEXT_TASKS.md
+---
 
-## 🎯 Summary
+## 🌐 Web Interface & System Enhancements
+### Web UI Improvements
+- [ ] Add auth + session management to agent_webui.py / secure_webui.py
+- [ ] Integrate PDF ingestion controls + processing feedback
+- [ ] Extend service control + monitoring widgets
+- [ ] Polish UI/UX (layout, theme, responsive behavior)
 
-The system is functional with a working web interface. Advanced features and template fixes can be addressed as time allows. All files are preserved as requested.
+### API & Security Hardening
+- [ ] Add API key auth + rate limiting
+- [ ] Expand structured logging + error correlation
+- [ ] Implement TLS / reverse proxy hardening
+- [ ] Harden input validation paths
+
+### Template Remediation (main.py)
+- [ ] Audit current Jinja2 template/CSS pipeline
+- [ ] Decide: external CSS vs alternate templating engine vs rewrite
+- [ ] Prototype fix and regression test web views
+
+---
+
+## 🔊 Audio System Roadmap
+- [ ] Configure persistent audio device permissions & priority
+- [ ] Implement fallback/alternate TTS backend selection
+- [ ] Create audio troubleshooting + recovery playbook
+- [ ] Test multi-backend switching under load
+
+---
+
+## 📚 Documentation & Testing
+### Documentation
+- [ ] Remote access user guide
+- [ ] TTS setup + troubleshooting doc
+- [ ] Deployment + recovery guide
+- [ ] Update SERVICES_CONFIG.md as features land
+
+### Testing & Performance
+- [ ] API + web regression suite
+- [ ] Remote access reproducibility tests
+- [ ] Performance benchmarking under concurrent workloads
+- [ ] Load test finance pipeline (PDF batches)
+
+---
+
+## 🧭 Future / Backlog
+- Multi-user voice command interface
+- Mobile companion interface
+- Calendar/email integrations
+- Plugin / extension architecture
+- Nightly self-healing audit system
+- Resource-aware scheduling + observability upgrades
+
+---
+
+## ✅ Recently Completed
+- secure_webui.py validated on port 8080
+- Template issues documented in `TEMPLATE_ISSUES.md`
+- Services inventory captured in `SERVICES_CONFIG.md`
+- Agent interaction UI shipped (`agent_webui.py`)
+- Remote access IP whitelist & directory structure fixes
+- Finance Intelligence MVP spec refreshed (v2)
+
+---
+
+> **Note:** `next-tasks.md` now mirrors this file for compatibility, but updates should be made here first.
