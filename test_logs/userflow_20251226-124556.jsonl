@@ -1,0 +1,1 @@
+{"event": "upload_result", "data": {"step": "upload", "ok": true, "status_code": 303, "duration": 0.0058345794677734375, "ts": "2025-12-26T12:45:56.110930Z", "location": "/?upload=success&doc=finance-20251226-124556-d27a71", "doc_id": "finance-20251226-124556-d27a71"}}

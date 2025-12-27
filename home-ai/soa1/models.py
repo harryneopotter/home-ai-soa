@@ -39,7 +39,8 @@ class ModelEndpoint:
 
     @property
     def chat_url(self) -> str:
-        return f"{self.base_url.rstrip('/')}/v1/chat/completions"
+        # Prefer Ollama native endpoint so keep_alive is honored when present
+        return f"{self.base_url.rstrip('/')}/api/chat"
 
 
 def _load_model_endpoints() -> Dict[str, ModelEndpoint]:
@@ -99,14 +100,15 @@ def call_phinance(payload_json: str) -> str:
 
 
 def _build_chat_payload(endpoint: ModelEndpoint, user_content: str) -> Dict:
+    # Use Ollama native API shape to support keep_alive semantics when possible
     return {
         "model": endpoint.model_name,
         "messages": [{"role": "user", "content": user_content}],
-        "options": {
-            "temperature": endpoint.temperature,
-            "num_predict": endpoint.max_tokens,
-        },
+        "temperature": endpoint.temperature,
+        "num_predict": endpoint.max_tokens,
         "stream": False,
+        # Keep alive negative -> infinite / pinned
+        "keep_alive": -1,
     }
 
 

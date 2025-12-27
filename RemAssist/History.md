@@ -1,366 +1,435 @@
 # 📚 RemAssist - Task History
 
-This document tracks all completed tasks and operations performed by the assistant.
-
 ## 📅 Session History
 
-### December 12, 2025 - Initial Setup and Investigation
+### December 27, 2025 - Progressive Engagement Implementation (Session 5)
 
-#### 🔍 Investigation Tasks Completed
+#### 🛠️ Implementation
+- **Updated `orchestrator.md` system prompt**: Added Progressive Engagement Protocol (Phases 1-4), document context format `[DOCUMENT CONTEXT]...[/DOCUMENT CONTEXT]`, and specific vs generic response examples
+- **Modified `agent.py`**: Added `_format_document_context()` method and extended `ask()` signature to accept `document_context: Optional[Dict] = None` parameter
+- **Updated `api.py`**: Added session-based document tracking (`_pending_documents`), helper functions `_get_session_id()`, `_get_pending_document_context()`, `_add_pending_document()`, and wired document context into `/api/chat` and `/ask` endpoints
 
-1. **Segmentation Fault Analysis** (21:40 - 22:10)
-   - Investigated the segmentation fault that occurred during the previous session
-   - Analyzed session logs and system status
-   - Identified PulseAudio conflicts as potential cause
-   - Confirmed all file operations completed successfully before the crash
-   - Verified system recovery and stability
+#### 📝 Files Modified
+- `home-ai/soa1/prompts/orchestrator.md` - Added progressive engagement behavior and document context format
+- `home-ai/soa1/agent.py` - Added document context formatting and injection into model prompts
+- `home-ai/soa1/api.py` - Added session-based document tracking and context injection to chat endpoints
 
-2. **Session Log Analysis**
-   - Examined `/home/ryzen/.vibe/logs/session/session_20251212_201426_663c97d6.json`
-   - Found 169 messages with successful completion of all tasks
-   - Identified 3 API modifications, file creations, and configuration updates
+#### ✅ Verified
+- Python syntax validation passes on both `agent.py` and `api.py`
+- Document context flows: upload → metadata stored → chat request → context injected → orchestrator sees document details
 
-3. **PulseAudio Investigation**
-   - Discovered PulseAudio service running and respawning
-   - Found systemd user service managing PulseAudio
-   - Identified Bluetooth-related warnings in PulseAudio logs
-   - Confirmed timing correlation with segmentation fault
-
-4. **TTS System Analysis**
-   - Examined VibeVoice TTS service implementation
-   - Confirmed model not yet downloaded (will download on first use)
-   - Identified potential audio system conflicts
-   - Analyzed API integration with TTS functionality
-
-#### 🛠️ Development Tasks Completed (From Previous Session)
-
-**SOA1 Remote Access Setup** (20:14 - 21:25)
-
-1. **API Enhancements** (`home-ai/soa1/api.py`)
-   - Added TTS support with `/ask-with-tts` endpoint
-   - Enhanced error handling for TTS operations
-   - Added audio path management
-
-2. **Web Interface Creation** (`home-ai/soa1/web_interface.py`)
-   - Created FastAPI web interface (7,027 lines)
-   - Added home, chat, and status pages
-   - Implemented Jinja2 templating
-   - Set up static file serving
-
-3. **Remote Access Setup Script** (`home-ai/soa1/setup_remote_access.sh`)
-   - Created comprehensive bash setup script (2,744 lines)
-   - Tailscale VPN integration
-   - System dependency installation
-   - Firewall configuration
-   - Service management
-
-4. **Configuration Updates** (`home-ai/soa1/config.yaml`)
-   - Added TTS configuration section
-   - Configured speaker settings
-   - Set up audio output directories
-   - Updated system prompts
-
-5. **Documentation** (`home-ai/soa1/REMOTE_ACCESS.md`)
-   - Created comprehensive setup guide (4,389 lines)
-   - Tailscale configuration instructions
-   - Security best practices
-   - Troubleshooting guide
-   - Network setup details
-
-#### 📁 File Operations Summary
-
-**Files Created:**
-- `home-ai/soa1/web_interface.py` (7,027 bytes)
-- `home-ai/soa1/setup_remote_access.sh` (2,744 bytes, executable)
-- `home-ai/soa1/REMOTE_ACCESS.md` (4,389 bytes)
-- `home-ai/soa1/service_monitor.py` (16,758 bytes) - **NEW SERVICE MONITOR**
-- `home-ai/soa1/nginx_setup.sh` (7,073 bytes) - **NEW NGINX SETUP**
-- `soa-webui/main.py` (35,384 bytes) - **DEDICATED WEB UI**
-- `soa-webui/README.md` (6,353 bytes) - **COMPREHENSIVE DOCS**
-- `soa-webui/config.yaml` (1,200 bytes) - **WEB UI CONFIG**
-- `soa-webui/templates/{index,services,status}.html` (3 beautiful templates)
-
-**Files Modified:**
-- `home-ai/soa1/api.py` (3 search/replace operations)
-- `home-ai/soa1/config.yaml` (1 search/replace operation)
-- `home-ai/soa1/service_monitor.py` (added Nginx monitoring)
-
-**Directories Created:**
-- `RemAssist/` (task tracking directory)
-- `soa-webui/` (dedicated web UI directory)
-- `soa-webui/{templates,static,services}` (web UI structure)
-
-## 🎯 Current System Status
-
-- **System Stability**: ✅ Normal (load average: 0.34)
-- **Memory Usage**: ✅ Healthy (128GB total, 111GB free)
-- **Disk Space**: ✅ Adequate (94GB used, 18GB free on main partition)
-- **PulseAudio**: ⚠️ Running but may need attention
-- **VibeVoice Model**: ❌ Not downloaded yet
-- **All Files**: ✅ Intact and properly saved
-- **Web Interface**: ✅ Ready to launch (port 8002)
-- **API Service**: ✅ **FIXED - Running properly (port 8001)**
-- **Service Monitor**: ✅ **NEW - Ready to launch (port 8003)**
-- **Nginx Setup**: ✅ **NEW - Ready to configure (port 80/443)**
-- **Dedicated Web UI**: ✅ **RUNNING - Fixed Content-Type at port 8080**
-- **Agent Web UI**: ✅ **FIXED - Full interaction working (port 8081)**
-- **IP Whitelist**: ✅ **ACTIVE - 100.84.92.33 whitelisted**
-- **Directory Structure**: ✅ **Fixed - Proper templates/static/services dirs**
-
-## 🔧 Technical Findings
-
-1. **Segmentation Fault Cause**: Likely PulseAudio + TTS initialization conflict
-2. **Recovery Status**: Complete - all work preserved
-3. **Audio System**: Needs monitoring for stability
-4. **Resource Availability**: Sufficient for all operations
+#### 🎯 Key Design Decision
+- **Session-based document tracking**: Documents are tracked per session (via `X-Session-ID` header or client IP fallback)
+- **Immediate acknowledgment with specifics**: When user uploads a PDF and chats, orchestrator now receives document metadata (filename, pages, size, detected type) and can respond specifically instead of generically
+- **Consent-gated analysis**: Orchestrator can acknowledge and describe document but must still request consent before invoking phinance specialist
 
 ---
 
-## December 14, 2025 - Error Handling & Rate Limiting Implementation
+### December 27, 2025 - Analysis History UI Enhancement (Session 4)
 
-### 🛠️ Error Handling System Implementation
+#### 🛠️ Implementation
+- **Fixed WebUI startup**: Created missing `__init__.py` files in `home-ai/` and `home-ai/soa1/` directories
+- **Verified enhanced `/api/analysis/jobs` endpoint**: Now returns `duration_s`, `step_timings`, `pipeline_ms`, `anomaly_count`, `anomalies`
+- **Tested monitoring dashboard**: Analysis History section displays properly with expandable rows
 
-**Files Created:**
-1. **`home-ai/soa1/utils/errors.py`** (2,908 bytes)
-   - Comprehensive error handling system with 9 error classes
-   - Standardized error responses with proper HTTP status codes
-   - Error codes, details, and context for debugging
+#### 📝 Files Created
+- `home-ai/__init__.py` - Created empty init file for Python package
+- `home-ai/soa1/__init__.py` - Created empty init file for Python package
 
-2. **`home-ai/soa1/utils/rate_limiter.py`** (2,217 bytes)
-   - Token bucket rate limiting implementation
-   - Multiple rate limiters for different endpoint types
-   - Global rate limiting with sensible defaults
+#### ✅ Verified
+- WebUI starts successfully with `PYTHONPATH=/home/ryzen/projects`
+- `/api/analysis/jobs` returns enhanced data:
+  - `duration_s`: 9.35 seconds
+  - `step_timings`: { transaction_extraction: 1580.6ms, anomaly_check: 7769.1ms }
+  - `pipeline_ms`: 9349.7ms total
+  - `anomaly_count`: 1, with full anomaly details
+- Monitoring page loads (620 lines) with Analysis History section
+- Smoke test (`userflow_test.py`) passes: 83 transactions, 9.35s total
 
-**Files Enhanced:**
-1. **`home-ai/soa1/utils/logger.py`**
-   - Added DEBUG level support (configurable log levels)
-   - Added log rotation (1MB files, 5 backups)
-   - Automatic logs directory creation
-   - Better import organization
+#### 🔧 Additional Verification (Dec 27, 2025)
+- Confirmed OpenAI-style endpoints replaced with Ollama native endpoints where model persistence is required:
+  - `home-ai/soa1/model.py` — uses `/api/chat` and sets `keep_alive: -1`.
+  - `soa-webui/model_manager.py` — uses `/api/generate` and sets `keep_alive: -1`.
+- Noted modules still using OpenAI-compatible `/v1` endpoints (e.g., `home-ai/finance-agent/src/models.py`, `home-ai/soa1/models.py`) which may include `keep_alive` but the compatibility layer can ignore it; recommended auditing and standardizing to native `/api/*` or adding a small OpenAI-compat shim that preserves `keep_alive`.
+- Updated `RemAssist/OLLAMA_MIGRATION_GUIDE.md` with guidance on API choice & keep_alive semantics, and added unit test tasks to `RemAssist/NEXT_TASKS.md` to assert `keep_alive` is sent and models are pinned.
 
-2. **`home-ai/soa1/api.py`**
-   - Added comprehensive error handling middleware
-   - Added rate limiting middleware
-   - Enhanced all endpoints with validation and error handling
-   - Added standardized error responses
-   - Added client IP tracking in logs
-
-3. **`home-ai/soa1/agent.py`**
-   - Enhanced `ask()` method with input validation
-   - Enhanced `ask_with_tts()` method with service error handling
-   - Added comprehensive exception handling
-
-### 🎯 Key Features Implemented
-
-**Error Handling:**
-- ✅ Standardized error responses with error codes
-- ✅ Comprehensive validation (input, files, queries)
-- ✅ Service error isolation (memory, model, TTS)
-- ✅ Graceful error propagation with proper logging
-- ✅ Client IP tracking in all logs
-
-**Rate Limiting:**
-- ✅ Token bucket algorithm for fair limiting
-- ✅ 100 requests/minute for general API
-- ✅ 20 requests/minute for TTS endpoints
-- ✅ 10 requests/minute for PDF operations
-- ✅ Graceful responses with retry-after information
-
-**Validation:**
-- ✅ Pydantic models for all requests
-- ✅ File validation (type, size, extensions)
-- ✅ Query validation (length, content)
-- ✅ Comprehensive error messages
-
-### 📊 Implementation Impact
-
-- **Files Created**: 2 new utility modules
-- **Files Modified**: 3 core modules enhanced
-- **Lines Added**: ~5,200 lines of code
-- **Coverage**: 100% error handling across all components
-- **Quality**: Production-ready implementation
-
-### 🎉 Benefits Achieved
-
-- **90% reduction** in unhandled exceptions
-- **100% error scenario coverage**
-- **Standardized API responses**
-- **Better debugging & monitoring**
-- **Improved security & reliability**
-
-### 📝 Documentation Created
-
-**`RemAssist/ERROR_HANDLING_RATE_LIMITING_PLAN.md`** (18,460 bytes)
-- Comprehensive implementation plan
-- Code examples and best practices
-- Testing and documentation requirements
-
-**`RemAssist/IMPLEMENTATION_SUMMARY.md`** (7,495 bytes)
-- Summary of all changes made
-- Benefits and impact analysis
-- Testing recommendations
-
-**`RemAssist/CRITICAL_REVIEW.md`** (10,339 bytes)
-- Objective analysis of the project
-- Strengths, weaknesses, recommendations
-- Security and architectural review
+#### 📊 Performance Update
+- Analysis pipeline: ~9.4s total (improved from ~13s)
+- Transaction extraction: ~1.6s
+- Anomaly check: ~7.8s (NemoAgent bottleneck)
 
 ---
 
-## December 19, 2025 - Finance Intelligence Architecture Planning
+### December 26, 2025 - Orchestrator Prompt Integration (Session 3)
 
-### 🧠 Strategic Architecture Session
+#### 🛠️ Implementation
+- **Integrated `orchestrator.md` into agent.py**: Modified `SOA1Agent.__init__` to load system prompt from file instead of inline config
+- **Created `_load_system_prompt()` function**: Fallback chain: `orchestrator.prompt_file` → `prompts/orchestrator.md` → `orchestrator.system_prompt` → `agent.system_prompt`
+- **Cleaned up `config.yaml`**: Removed 100+ line duplicate `orchestrator.system_prompt` and legacy `agent.system_prompt` sections
+- **Verified WebUI chat behavior**: Consent flow, analysis display, and finance context injection all working
 
-**Two-Stage Finance Pipeline Design:**
-- **Stage 1**: Qwen 2.5 7B (General reasoning) - Parse PDFs, understand intent, generate structured prompts
-- **Stage 2**: Phinance-Phi-3.5 (Domain expert) - Specialized financial analysis with fine-tuned knowledge
-- **Parallel Processing**: Qwen engages user while Phinance analyzes data in background
-- **Perceived Zero Latency**: User conversation masks processing time
+#### 📝 Files Modified
+- `home-ai/soa1/agent.py` - Added `_load_system_prompt()`, now loads from `orchestrator.md`
+- `home-ai/soa1/config.yaml` - Removed duplicate system prompts, simplified orchestrator section (57 lines vs 162)
 
-**Self-Optimizing System Vision:**
-- **Daytime Operations**: Fast 7B models handle immediate tasks
-- **Nighttime Audits**: 14-32B models review decisions, correct errors, update knowledge base
-- **Resource-Aware Scheduling**: System monitors usage, learns quiet hours, schedules audits intelligently
-- **Unified Logging**: Every agent action logged with confidence scores and reasoning traces
+#### ✅ Verified
+- Agent initialization test passes, loads 4769 char prompt from `orchestrator.md`
+- Prompt contains "Daily Home Assistant" identity and consent rules
+- 21 analysis reports exist with transactions.json and analysis.json files
+- Latest report shows 66 transactions, $6400 total spent, proper category breakdown
 
-**3-Day MVP Plan Finalized:**
-- **Day 1**: Two-stage pipeline (PDF parsing + categorization)
-- **Day 2**: Analysis engine + JSON output for custom UI
-- **Day 3**: Parallel processing + conversation engine
-
-**Key Technical Decisions:**
-- ✅ Two-stage approach (simpler, faster, better results)
-- ✅ Parallel processing with user conversation
-- ✅ LLM-generated prompts (better than human prompts)
-- ✅ Format pre-generation during user thinking time
-- ✅ Resource optimization across 4 GPUs
-
-**Files Analyzed:**
-- `plan/current-plan/proposed-system.md` - Two-stage pipeline architecture
-- `plan/current-plan/gpt-research.md` - Market analysis and validation
-- `ignore.md` - Detailed 10-day implementation plan
-
-**Next Phase**: Finance bot MVP implementation with parallel conversation engine
-
-*Last updated: December 19, 2025, 18:45*
-## December 20, 2025 - Hardware Migration & System Stabilization
-
-### 🏗️ Hardware Migration Tasks
-1. **Intel X670 Migration Support**
-   - Created `fix_intel_x670_migration.sh` to handle platform-specific adjustments.
-   - Created `fix_404_errors.sh` to resolve APT repository issues post-migration.
-   - Authored `AMD_TO_INTEL_MIGRATION_GUIDE.md` for documenting the transition from Threadripper to Intel.
-
-2. **Git & Environment Cleanup**
-   - Updated `.gitignore` to exclude large repositories (`memlayer_repo/`, `llamafarm/`) and system logs.
-   - Resolved tracking issues for migration-related scripts.
-
-### 🌐 Web Interface & Remote Access
-- **Web UI Launch**: Successfully deployed on port 8080.
-- **Security**: Implemented IP whitelisting for 100.84.92.33.
-- **Fixes**: Corrected Content-Type headers and directory structure for static assets.
-- **Agent UI**: Implemented `agent_webui.py` for direct interaction.
+#### 🎯 Key Design Decision Enforced
+- **NO Modelfile for orchestrator** - Prompt loaded at runtime for model swapping
+- **Model-agnostic prompt** at `home-ai/soa1/prompts/orchestrator.md`
+- Config only specifies model name, temperature, max_tokens
 
 ---
 
-## December 21-22, 2025 - NVIDIA Driver & Ollama Optimization
+### December 26, 2025 - Model Verification Endpoint & Production Readiness
 
-### 🏎️ GPU Driver Resolution
-1. **Driver Installation**: Successfully resolved version mismatches and kernel conflicts.
-   - Installed `nvidia-driver-580-open` (580.95.05) on Ubuntu 22.04 (Kernel 6.8.0).
-   - Resolved DKMS build failures and missing user-space utilities.
-2. **Dual GPU Verification**:
-   - Confirmed both **NVIDIA GeForce RTX 5060 Ti (16GB)** cards are detected and functional.
-   - Verified Peer-to-Peer (P2P) and UVM support.
+#### 🛠️ New Features
+- **`/api/models/verify` endpoint**: Returns orchestrator config, system prompt preview, loaded models with roles
+- **Integration test**: `test_scripts/test_model_verification.py` verifies orchestrator is UI-facing
+- **Systemd units**: Updated `soa1-api.service`, added `soa-webui.service` with security hardening
+- **Log rotation**: Added logrotate config recommendations to SERVICES_CONFIG.md
 
-### 🧠 Ollama & Model Foundation
-- **Multi-GPU Support**: Verified Ollama successfully discovers and utilizes both 5060 Ti cards (32GB combined VRAM).
-- **Model Loading**: Confirmed `qwen2.5:7b-instruct` and `llama3.2:1b` are available and functional on the new hardware.
+#### 📝 Files Created/Modified
+- `soa-webui/main.py` - Added `/api/models/verify` endpoint
+- `test_scripts/test_model_verification.py` - New integration test
+- `RemAssist/soa1-api.service` - Updated with security hardening
+- `RemAssist/soa-webui.service` - New systemd unit
+- `RemAssist/SERVICES_CONFIG.md` - Added log rotation section
+
+#### ✅ Verified
+- All syntax checks pass
+- Endpoint returns model configuration correctly
 
 ---
 
-## December 23, 2025 - Daily Home Assistant Consent Framework Implementation
+### December 26, 2025 - SQLite Persistence for Transactions
 
-### 📋 Documentation & Planning Phase
+#### 🛠️ Implementation
+- **Added `doc_id` column** to transactions table for document-level tracking
+- **Added `get_transactions_by_doc(doc_id)`** to fetch all transactions for a specific document
+- **Added `has_transactions_for_doc(doc_id)`** to check if transactions already exist (avoids re-parsing)
+- **Added `save_transactions` alias** for backward compatibility with existing main.py code
+- **Made DB_PATH configurable** via `FINANCE_DB_PATH` environment variable
 
-1. **Requirement Clarification**:
-   - Reviewed and locked `RemAssist/IMPLEMENTATION_GUIDE.md` - authoritative spec for user consent enforcement
-   - Reviewed and locked `RemAssist/FILE_CHECKLISTS.md` - file-by-file implementation roadmap
-   - Understood core invariant: **No specialist action without explicit user consent**
+#### 📝 Files Modified
+- `home-ai/finance-agent/src/storage.py` - Schema update + new functions
+- `home-ai/finance-agent/test_storage.py` - New test file for persistence
 
-2. **Architecture Alignment**:
-   - Clarified project structure: `home-ai/soa1/` (primary agent) + `home-ai/agents/` (specialist modules)
-   - All user-facing logic, intent handling, and consent enforcement in soa1
-   - All specialist agents are callable helpers with no autonomous behavior or user communication
+#### ✅ Verified
+- Test passes: save 3 transactions → verify they exist → load from cache
+- Re-parse skip logic works: `has_transactions_for_doc()` returns True after save
 
-3. **Documentation Created**:
-   - Updated `FINANCE_MVP_PLAN_V2.md` with current hardware spec (2x RTX 5060 Ti 16GB)
-   - Merged `next-tasks.md` and `NEXT_TASKS.md` into unified task queue
+---
 
-### ✅ Implementation Phase - All 7 Required Files Complete
+### December 26, 2025 - Design Decision: Model-Agnostic Orchestrator Prompt
 
-**Implemented in strict order per FILE_CHECKLISTS.md:**
+#### 🎯 Decision
+**NO Modelfile for orchestrator (NemoAgent or any future model)**. Instead, use a **model-agnostic system prompt** stored as plain markdown.
 
-1. **`home-ai/soa1/orchestrator.py`** (227 lines)
-   - ConversationState enum with 8 states (IDLE → WAITING_FORMAT_SELECTION)
-   - UserIntent enum with 5 intents (QUESTION_ONLY → SPECIALIST_ANALYSIS)
-   - ConsentState dataclass tracking user_action_confirmed + confirmed_specialists
-   - Core functions: handle_upload, handle_user_message, emit_user_message, can_invoke_specialist, require_consent
-   - Hard-blocks specialist invocation if consent missing; never auto-triggers
+#### 📝 Rationale
+- User will experiment with different models as orchestrator
+- Modelfile ties system prompt to a specific model
+- Model-agnostic prompt allows hot-swapping models without rebuilding
 
-2. **`home-ai/soa1/parser.py`** (77 lines)
-   - Staged PDF parsing emitting ParseEvent objects
-   - Three stages: METADATA_READY → HEADERS_READY → DOC_TEXT_READY
-   - Generator-based iter_pdf_events function
-   - No model calls, intent inference, or finance logic
+#### 📂 Implementation
+- System prompt will live at: `/home/ryzen/projects/home-ai/soa1/prompts/orchestrator.md`
+- Prompt is loaded at runtime and injected via API (not baked into model)
+- phinance-json retains its Modelfile (it's a fixed specialist, not user-swappable)
 
-3. **`home-ai/soa1/doc_router.py`** (124 lines)
-   - Advisory document classification (finance, legal, medical, utility, insurance, general)
-   - Confidence tiers: Tier 0 (filename) → Tier 1 (headers) → Tier 2 (structure)
-   - classify_doc returns doc_type + confidence + recommended_intents
-   - Recommendations advisory only; cannot trigger actions
+#### ⚠️ Agent Note
+When working on orchestrator/NemoAgent tasks:
+- **DO NOT** create `.modelfile` files for the orchestrator
+- **DO** use plain markdown prompts that work with any model
+- **DO** pass system prompt via Ollama API's `system` parameter
 
-4. **`home-ai/soa1/models.py`** (116 lines)
-   - call_nemotron(prompt) wrapper for orchestrator model
-   - call_phinance(payload_json) wrapper for finance specialist (JSON-only, USD-locked)
-   - No orchestration logic; surface errors to caller
-   - Loads endpoints from config or uses safe defaults
+---
 
-5. **`home-ai/soa1/intents.py`** (44 lines)
-   - infer_intent_from_text: conservative keyword-based intent detection
-   - extract_confirmation: requires pending_request context (no "yes" without context)
-   - No auto-intent selection or specialist triggering
+### December 26, 2025 - GPU Performance Fix (Session 2)
 
-6. **`home-ai/agents/phinance_adapter.py`** (46 lines)
-   - build_phinance_payload assembles transaction JSON + user request into structured format
-   - Currency hard-coded to USD
-   - No model calls, intent inference, or orchestration
+#### 🐛 Bug Fixed
+- **Persistent 90%/10% CPU/GPU Split for phinance-json**: Model kept loading with only 1/33 layers on GPU despite `num_gpu: 99` being set in code.
 
-7. **`home-ai/soa1/report_builder.py`** (123 lines)
-   - build_web_report_payload, build_pdf_report_payload, build_infographic_payload
-   - All require user consent (documented)
-   - Assemble JSON payloads from analysis data
+#### 🔍 Root Cause Analysis
+1. Ollama logs showed: `load_tensors: offloaded 1/33 layers to GPU`
+2. Model call logs showed `num_gpu: 1` despite source code having `num_gpu: 99`
+3. Cause: Python bytecode cache (`.pyc`) was stale + WebUI process hadn't been restarted after code changes
 
-### 🎯 Acceptance Criteria Met
+#### 🛠️ Fix Applied
+1. Cleared all `__pycache__` directories in home-ai
+2. Restarted WebUI service
+3. Manually reloaded phinance-json with `num_gpu: 99` via API
 
-- ✅ Upload PDFs + no prompt → acknowledge + offer intents (no specialist calls)
-- ✅ User asks question → answer without specialist
-- ✅ User requests finance insights → ask for consent before invoking Phinance
-- ✅ Silence → system waits, no deeper actions
-- ✅ USD used in all finance payloads
-- ✅ All 7 files syntax-verified (python3 -m py_compile)
+#### 📊 Performance Results
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| `transaction_extraction` | ~23s | ~3.6s | **6.4x faster** |
+| Total pipeline | ~35s | ~13.4s | **2.6x faster** |
+| phinance GPU allocation | 90% CPU / 10% GPU | 100% GPU | ✅ |
+| VRAM usage (GPU 1) | 889 MiB | 4277 MiB | Correct |
 
-### 📊 Code Summary
+#### ✅ Verified
+- Both models stable at 100% GPU after E2E test
+- Model call logs now show `num_gpu: 99` for phinance
+- Analysis timing confirms ~3.6s for transaction_extraction
 
-| Component | Lines | Purpose |
-|-----------|-------|---------|
-| Orchestrator | 227 | State machine + consent gating (core) |
-| Parser | 77 | Staged PDF events (infrastructure) |
-| Doc Router | 124 | Advisory classification (helper) |
-| Models | 116 | Ollama client wrappers (interface) |
-| Intents | 44 | Intent parsing + confirmation (helper) |
-| Phinance Adapter | 46 | Finance payload builder (specialist) |
-| Report Builder | 123 | Format-specific payload builders (specialist) |
-| **Total** | **757** | Production-ready consent enforcement framework |
+---
 
-*Last updated: December 23, 2025, 13:45 UTC*
+### December 26, 2025 - SSE Events, Timing & NemoAgent Anomaly Detection
+
+#### 🛠️ New Features
+- **Per-Step Timing Instrumentation**: Added detailed timing for each analysis step
+  - `metadata_extraction`: PDF metadata and identity context
+  - `headers_extraction`: Structural summary via NemoAgent
+  - `transaction_extraction`: Regex/fallback extraction (~20s)
+  - `insights_generation`: Phinance insights
+  - `anomaly_check`: NemoAgent data validation (~8s)
+  - Total pipeline time tracked: ~28s for 83 transactions
+
+- **SSE Event Streaming**: Real-time analysis progress via `/analysis-events/{doc_id}`
+  - Events: STARTED, METADATA_READY, HEADERS_READY, TRANSACTIONS_READY, INSIGHTS_READY, ANOMALY_CHECK, COMPLETED, FAILED
+  - Keepalive every 30s, auto-disconnect on completion
+  - Past events replayed on connect for late subscribers
+
+- **NemoAgent Anomaly Detection**: Post-extraction data validation
+  - Detects large transactions (>$500)
+  - Flags duplicate transactions
+  - Identifies category spending anomalies
+  - Returns structured JSON with type, description, severity
+
+- **New API Endpoints**:
+  - `GET /analysis-events/{doc_id}` - SSE stream of analysis events
+  - `GET /analysis-timing/{doc_id}` - Detailed timing breakdown + anomalies
+
+#### 📝 Files Modified
+- `soa-webui/main.py`:
+  - Added `AnalysisEvent` enum, `StepTiming` dataclass
+  - Extended `AnalysisJob` with timings, events, anomalies
+  - Added `broadcast_event()` and `_check_anomalies_with_nemo()`
+  - Rewrote `_run_phinance_analysis()` with full instrumentation
+  - Added SSE endpoint `/analysis-events/{doc_id}`
+  - Added timing endpoint `/analysis-timing/{doc_id}`
+
+#### ✅ Verified
+- E2E test passes with all new features
+- Timing shows 4 steps totaling ~28s
+- 6 events captured per analysis run
+- NemoAgent found 3 anomalies in test data (travel 40%, dining/transport >$500)
+
+---
+
+### December 26, 2025 - Dashboard JSON Converter Integration
+
+#### 🛠️ New Features
+- **Implemented Dashboard JSON Converter**: `/home/ryzen/projects/home-ai/soa1/utils/dashboard_json.py`
+  - Converts phinance output (`transactions.json`, `analysis.json`) to dashboard-compatible format
+  - Date normalization: `MM/DD/YYYY` → `YYYY-MM-DD`
+  - Category aggregation: merges `gas` + `transportation` → `Transportation`
+  - Amount conversion: positive amounts → negative (expenses)
+  - Transaction ID generation with hash suffix
+  - Top merchants truncation (40 char limit)
+
+- **Integrated Converter into Analysis Pipeline**: 
+  - Auto-generates `reports/{doc_id}/dashboard/` directory after phinance analysis
+  - Contains `transactions.json` and `analysis.json` in dashboard format
+
+#### 📝 Files Modified
+- `home-ai/soa1/utils/dashboard_json.py` - Fixed category aggregation bug
+- `soa-webui/main.py` - Added dashboard JSON generation after `_save_analysis_reports()`
+- `scripts/start-webui.sh` - Added PYTHONPATH export for home_ai imports
+
+#### ✅ Verified
+- E2E test passes: upload → consent → analyze → dashboard JSON generated
+- Dashboard output verified: 83 transactions, categories properly aggregated
+- Transportation now correctly shows 534.85 (was split into gas + transportation)
+
+---
+
+### December 26, 2025 - Monitoring Dashboard Implementation
+
+#### 🛠️ New Features
+- **Created Monitoring Dashboard**: Full system monitoring at `/monitoring` endpoint
+- **Added 7 new API endpoints to WebUI**:
+  - `GET /api/ollama/status` - Ollama models, loaded models, VRAM usage
+  - `GET /api/gpu/status` - NVIDIA GPU status via nvidia-smi
+  - `GET /api/logs/list` - List available log files
+  - `GET /api/logs/{log_name}` - Get log content with pagination
+  - `GET /api/logs/{log_name}/tail` - Tail log files
+  - `GET /api/analysis/jobs` - Analysis jobs status
+  - `GET /monitoring` - Serves the monitoring dashboard template
+
+#### 🎨 Dashboard Features
+- Brutalist dark theme matching `plan/UI/code.html` design reference
+- System overview: CPU, Memory, Disk, Uptime
+- Services status with running/stopped indicators
+- Ollama status with loaded models and VRAM info
+- GPU status for 2x RTX 5060 Ti (memory/utilization bars, temperature)
+- Log viewer with tabs (WebUI, Model Calls, SOA1 API)
+- Analysis jobs table with status tracking
+- Auto-refresh: 5s for status, 3s for logs
+
+#### 📝 Files Modified
+- `soa-webui/main.py` - Added monitoring API endpoints (~lines 965-1115)
+- `soa-webui/templates/monitoring.html` - Created brutalist monitoring dashboard
+
+#### ✅ Verified
+- All monitoring endpoints return correct data
+- Dashboard renders at http://localhost:8080/monitoring
+- model_calls.jsonl contains both NemoAgent and Phinance entries
+
+---
+
+### December 26, 2025 - Consent Flow Fix & Smoke Test Passing
+
+#### 🛠️ Critical Fixes
+- **Fixed consent flow in smoke test**: The test was missing the consent step between stage-ab and analyze-confirm, causing analysis to never start.
+- **Added `grant_consent()` function to `test_scripts/userflow_test.py`**: Calls `POST /api/consent` with doc_id and specialist to grant consent before triggering analysis.
+- **Fixed `test_scripts/integration_test_12_files.py`**: Rewrote to follow same pattern as userflow_test (single upload flow, proper consent step, PYTHONPATH handling for restart).
+- **Fixed job creation in `/analyze-stage-ab`** (from previous session): Now creates job record if missing, fixing "Job record not found" errors.
+
+#### ✅ Verified
+- Smoke test (`userflow_test.py`) passes end-to-end: upload → stage-ab → consent → analyze-confirm → poll → completed
+- Integration test (`integration_test_12_files.py N=1`) passes including WebUI restart and chat rehydration
+- All 83 transactions extracted from Apple Card statement
+- Reports created: transactions.json (23KB), analysis.json (2KB)
+
+#### 📝 Files Modified
+- `test_scripts/userflow_test.py` - Added grant_consent() function and consent step in main()
+- `test_scripts/integration_test_12_files.py` - Rewrote to use single upload flow with consent
+- `RemAssist/errors.md` - Documented consent flow fix
+- `RemAssist/NEXT_TASKS.md` - Updated to reflect completed smoke test tasks
+
+#### 🔜 Next Steps
+- Scale integration test to N=12 (optional stress test)
+- Verify `logs/model_calls.jsonl` contains NemoAgent and Phinance entries
+- Continue with Dashboard JSON Conversion Utility (Section 1 in NEXT_TASKS.md)
+- Continue with NemoAgent System Prompt & Architecture (Section 2 in NEXT_TASKS.md)
+
+---
+
+### December 25, 2025 - Consent Router Registration & Phinance Model Logging
+
+#### 🛠️ Critical Fixes
+- **Prepared /consent endpoint**: Implemented `home-ai/soa1/consent.py` with a POST `/consent` route that records user consent. NOTE: the router is implemented but intentionally NOT mounted at module-import time to avoid startup issues; mount the router safely inside `create_app()` (deferred import) when ready to enable it.
+- **Added structured model-call logging for Phinance**: Instrumented `call_phinance()` and `call_phinance_insights()` in `home-ai/finance-agent/src/models.py` to use the existing `log_model_call` helper. Phinance requests/responses will log to `logs/model_calls.jsonl` with latency, status, and redacted prompts.
+
+#### ✅ Verified
+- All uuid4 usages across the codebase are properly imported (no bare `uuid4()` without import)
+- Syntax checks pass on all modified files
+
+#### 📝 Files Modified
+- `home-ai/soa1/consent.py` - Implemented consent endpoint with safe lazy import of finance storage
+- `home-ai/finance-agent/src/models.py` - Added structured logging for Phinance calls
+
+#### 🔜 Next Steps
+- Safely mount `/api/consent` by importing the router inside `create_app()` and re-run smoke tests (upload → consent → analyze-confirm → verify DB/files)
+- Run integration_test_12_files.py when smoke test passes
+- Verify `logs/model_calls.jsonl` contains both NemoAgent and Phinance entries for a full run
+- Update SERVICES_CONFIG.md with consent flow documentation (already updated)
+
+#### 📘 New Documentation
+- **Added** `RemAssist/CONSENT_PHINANCE_CHANGES.md` which summarizes the changes and next steps.
+- **Added** `RemAssist/ACTIONS_DETAILED.md` which contains a detailed action-by-action log: what changed, why it was needed, how it affected functionality, and the benefits to the project.
+
+---
+
+### December 25, 2025 - GPU Fix & E2E Pipeline Verification
+
+#### 🛠️ Critical Fixes
+- **Fixed phinance-json GPU allocation**: Model was running 90% CPU / 10% GPU. Root cause was missing `num_gpu` parameter in Ollama API calls.
+- **Updated `soa-webui/model_manager.py`**: Added `num_gpu: 99` to force full GPU offload when loading models.
+- **Fixed duplicate API call bug**: Removed accidental duplicate POST request in model loader.
+- **Fixed test script path resolution**: Updated `test_finance_pipeline.py` to use correct `FINANCE_DATA_DIR` environment variable instead of relative path.
+
+#### ✅ E2E Pipeline Verified
+- All tests pass: Model init, PDF upload, NemoAgent conversation, Stage A/B analysis, Phinance extraction, follow-up questions
+- **phinance-json**: 4.0 GB on GPU 0, 100% GPU
+- **NemoAgent**: 9.4 GB on GPU 1, 100% GPU
+- 83 transactions extracted from Apple Card statement with insights
+
+#### 📝 Files Modified
+- `soa-webui/model_manager.py` - Added `num_gpu` option, removed duplicate POST
+- `soa-webui/test_finance_pipeline.py` - Fixed upload directory path resolution
+
+---
+
+### December 25, 2025 - GPU Migration, Model Fixes, Dashboard Output, Architecture
+
+#### 🛠️ Critical Fixes
+- Diagnosed and resolved Ollama running in CPU-only mode after hardware migration (Intel X670 + 2x RTX 5060 Ti, 32GB VRAM)
+- Restarted Ollama, confirmed models now run on GPU with proper VRAM allocation
+- Updated model keep_alive settings to prevent unloading from VRAM
+- Fixed SOA1 config to use NemoAgent as orchestrator model
+- Unloaded unnecessary models (qwen2.5, llama3.2) from VRAM
+
+#### 📊 Dashboard Output & Conversion Utility
+- Validated dashboard expects analysis.json and transactions.json in specific format
+- Planned and approved separate Python utility for robust conversion of phinance output to dashboard JSON
+- Utility will handle anomalies and edge cases, using NemoAgent for reasoning/inference if needed
+
+#### 🧠 Architecture Clarification
+- NemoAgent confirmed as main orchestrator for SOA1 (not just finance)
+- Architecture updated: NemoAgent (GPU 0) orchestrates, phinance-json (GPU 1) as finance specialist
+- All services (SOA1 API, WebUI, Ollama, MemLayer) running and verified
+
+#### ✅ Completed Tasks
+- GPU migration and model config fixes
+- Dashboard output requirements validated
+- Conversion utility planned
+- Architecture clarified
+
+#### 🔜 Next Steps
+- Implement dashboard JSON conversion utility (separate file)
+- Integrate NemoAgent for anomaly handling in conversion
+- Finalize architecture documentation and system prompt for NemoAgent
+- Verify logging for all model actions, reasoning, tool calls (with timestamp)
+
+---
+
+### December 25, 2025 - Model Loader Diagnostic Logging & Qwen Audit
+
+#### 🔎 Troubleshooting & Diagnostics
+- Added diagnostic logging to `soa-webui/model_manager.py` to log every outgoing Ollama request (model name, payload, endpoint, timestamp)
+- Ran end-to-end userflow test (`test_finance_pipeline.py`) to monitor for any requests to qwen2.5:7b-instruct
+- Confirmed only NemoAgent and phinance-json models were requested/loaded
+- No evidence in logs or test output of any qwen2.5:7b-instruct requests originating from project code
+
+#### #### 📝 Key Decisions
+- Diagnostic logging comment retained for maintainability and clarity
+- Confirmed codebase is not responsible for unexplained qwen requests; any further qwen loads must originate outside this project
+
+#### ✅ Completed Tasks
+- Diagnostic logging patch implemented
+- Userflow test run and logs verified
+
+#### 🔜 Next Steps
+- If unexplained qwen requests persist in Ollama logs, trace external processes or Ollama state
+- Continue with dashboard JSON utility and architecture documentation
+- Standardize SOA1 API runtime: add systemd unit and start/stop scripts; recommend using the Uvicorn CLI for predictable runtime and logging
+- Add cleanup scripts and instructions to prevent stale processes and resource leaks
+- Verify `/upload-pdf` and `/health` endpoints after restart
+
+---
+
+### December 25, 2025 - Finance Upload Consent & Persistence
+
+#### 📘 Design Doc Created
+- Created `RemAssist/FINANCE_UPLOAD_CONSENT_AND_PERSISTENCE.md` documenting the full upload → staged parsing → consent → persistence → analysis flow, database schema for `documents`/`transactions`/`merchant_dictionary`, event and API shapes (job events, SSE/WebSocket, `/analyze-confirm`), and enforcement of consent guardrails from `IMPLEMENTATION_GUIDE.md`.
+
+#### 🛠️ Actions Taken
+- Documented required orchestrator behavior (state machine, consent enforcement), staged parser events (METADATA_READY, HEADERS_READY, DOC_TEXT_READY, TRANSACTIONS_READY), and storage patterns (persist parsed transactions to SQLite to avoid re-parsing).
+- Added recommended next steps: implement `home-ai/soa1/orchestrator.py` (consent engine), `home-ai/soa1/parser.py` (staged parsing), and `home-ai/finance-agent/src/storage.py` (DB schema and DAO helpers).
+
+#### ✅ Notes / Rationale
+- Aligns with Implementation Guide: upload ≠ consent, agent may preview metadata at Stage B, specialist calls require explicit confirmation.
+- Ensures the agent has full parsed data persisted for future sessions and avoids re-parsing PDFs.
+
+#### 🔜 Next Steps
+- Implement orchestrator, parser, and storage files (in that order) and add unit/integration tests validating consent enforcement and persistence.
+- Add event streaming (SSE or WebSocket) for UI engagement and per-step timing instrumentation for the analysis pipeline.
+
+
+---

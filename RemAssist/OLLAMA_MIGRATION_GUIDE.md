@@ -16,6 +16,21 @@
 
 ## 🚀 Migration Plan
 
+### Important: API choice & keep_alive semantics
+
+**Summary:** When using Ollama as the runtime, prefer using Ollama native endpoints (/api/*) for model loading and chat when you need to keep models resident using the `keep_alive` option. The OpenAI-compatible `/v1` endpoints (e.g., `/v1/chat/completions`) have been observed to ignore the `keep_alive` flag on some Ollama versions/configs, which can lead to models being unloaded between requests (cold starts, higher latency).
+
+**Evidence in codebase:**
+- `home-ai/soa1/model.py` — `ModelClient.chat` builds a payload with `"keep_alive": -1` and POSTs to `/api/chat` (this ensures `keep_alive` is honored).
+- `soa-webui/model_manager.py` — `OllamaManager.load_model` includes `"keep_alive": -1` and POSTs to `/api/generate` to pin models when loading.
+
+**Notes & recommendations:**
+- Audit modules that still use OpenAI-compatible `/v1` endpoints (e.g., `home-ai/finance-agent/src/models.py`) — they may include `keep_alive` in the payload but Ollama's `/v1` compatibility layer may ignore it. Consider switching those calls to the native `/api` endpoints where model persistence is required.
+- Add unit tests asserting that code paths that should pin models actually send `keep_alive: -1` and use `/api/*` endpoints.
+- Optional: Implement a small local OpenAI-compat shim that proxies `/v1` requests to `/api` while preserving `keep_alive` semantics for compatibility with tools expecting the `/v1` shape. Bind to localhost or protect with access controls.
+
+
+
 ### Phase 1: Stop Ollama Service
 
 ```bash

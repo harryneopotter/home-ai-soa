@@ -1,0 +1,34 @@
+
+# SOA1 Web UI Configuration
+# Tailscale Edition
+
+# Server settings
+server:
+  host: "0.0.0.0"  # Listen on all interfaces for Tailscale
+  port: 8080       # Port for web UI
+
+# SOA1 Services
+services:
+  api: "http://localhost:8001"
+  web_interface: "http://localhost:8002"
+  service_monitor: "http://localhost:8003"
+  memlayer: "http://localhost:8000"
+
+# Tailscale settings
+tailscale:
+  enabled: true
+  # Allow only specific Tailscale IPs (optional)
+  allowed_ips:
+    - "100.64.0.0/10"  # Tailscale IP range
+
+# Security
+security:
+  # IP-based access control (Tailscale IPs only)
+  ip_whitelist:
+    - "100.64.0.0/10"
+
+# Features
+features:
+  service_control: true
+  monitoring: true
+  logging: true

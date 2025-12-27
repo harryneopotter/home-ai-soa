@@ -1,0 +1,660 @@
+# 🏗️ SOA1 Home Assistant - System Architecture
+
+**Version**: 1.0  
+**Last Updated**: December 25, 2025  
+**Hardware**: Intel X670 + 2x NVIDIA RTX 5060 Ti (16GB each, 32GB total VRAM)
+
+---
+
+## 📋 Table of Contents
+
+1. [System Overview](#system-overview)
+2. [Core Architecture](#core-architecture)
+3. [Orchestrator (Model-Agnostic)](#orchestrator-model-agnostic)
+4. [Specialist Agents](#specialist-agents)
+5. [Consent Framework](#consent-framework)
+6. [GPU Resource Management](#gpu-resource-management)
+7. [Data Flow](#data-flow)
+8. [Memory System](#memory-system)
+9. [API Architecture](#api-architecture)
+10. [Future Extensions](#future-extensions)
+
+---
+
+## 🎯 System Overview
+
+**SOA1 (Son of Anton)** is a local-first, privacy-focused home assistant system that provides multi-domain assistance through a main orchestrator and specialized agents.
+
+### Design Principles
+
+1. **Privacy-First**: All processing happens locally, no cloud dependencies
+2. **Consent-Based**: No specialist actions without explicit user confirmation
+3. **Modular**: Specialist agents are independent, swappable modules
+4. **Resource-Aware**: Intelligent GPU allocation across specialists
+5. **User Agency**: User always has control, silence ≠ consent
+
+### Key Capabilities
+
+- **General Assistance**: Question answering, conversation, memory recall
+- **Document Processing**: PDF parsing, summarization, extraction
+- **Finance Analysis**: Transaction extraction, spending insights, budgeting
+- **Knowledge Management**: (Future) Information organization and retrieval
+- **Scheduling**: (Future) Calendar and reminder management
+- **Budgeting**: (Future) Budget planning and tracking
+
+---
+
+## 🏛️ Core Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        SOA1 HOME ASSISTANT                       │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────┐    │
+│  │         Orchestrator (Model-Agnostic, GPU 0)          │    │
+│  │  - Main conversation interface                          │    │
+│  │  - Intent classification & routing                      │    │
+│  │  - Consent enforcement                                  │    │
+│  │  - Context management                                   │    │
+│  │  - Memory integration                                   │    │
+│  │  - System prompt: soa1/prompts/orchestrator.md          │    │
+│  └──────────────┬──────────────────────────────────────────┘    │
+│                 │                                               │
+│                 │ Routes to Specialists                          │
+│                 ▼                                               │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │              SPECIALIST AGENTS                            │  │
+│  │                                                           │  │
+│  │  ┌─────────────────────┐  ┌──────────────────────────┐  │  │
+│  │  │ Finance (GPU 1)     │  │ Budgeting (Future)       │  │  │
+│  │  │ - phinance-json     │  │ - Budget planning        │  │  │
+│  │  │ - Transaction parse │  │ - Expense tracking       │  │  │
+│  │  │ - Spending insights │  │ - Savings goals          │  │  │
+│  │  └─────────────────────┘  └──────────────────────────┘  │  │
+│  │                                                           │  │
+│  │  ┌─────────────────────┐  ┌──────────────────────────┐  │  │
+│  │  │ Knowledge (Future)  │  │ Scheduler (Future)       │  │  │
+│  │  │ - Info management   │  │ - Calendar integration   │  │  │
+│  │  │ - Document indexing │  │ - Reminders              │  │  │
+│  │  │ - Q&A retrieval     │  │ - Task management        │  │  │
+│  │  └─────────────────────┘  └──────────────────────────┘  │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │              SUPPORT SYSTEMS                              │  │
+│  │  - Memory Layer (long-term context)                       │  │
+│  │  - Orchestrator (consent & state management)              │  │
+│  │  - PDF Parser (document ingestion)                        │  │
+│  │  - Storage (SQLite, merchant dictionary)                  │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🧠 Orchestrator (Model-Agnostic)
+
+### Role & Responsibilities
+
+**The orchestrator is NOT a domain specialist** - it is the **main conversational orchestrator** that:
+
+1. **Engages with users** in natural conversation
+2. **Understands intent** through conversation analysis
+3. **Routes requests** to appropriate specialist agents
+4. **Enforces consent** before invoking specialists
+5. **Maintains context** across multi-domain conversations
+6. **Synthesizes results** from multiple specialists
+7. **Manages memory** for long-term user context
+
+### Key Characteristics
+
+- **Model**: User-swappable (currently NemoAgent, but any model can be used)
+- **GPU Assignment**: GPU 0 (primary, 16GB VRAM)
+- **Temperature**: 0.3 (balanced between creativity and consistency)
+- **Max Tokens**: 512 (concise responses)
+- **System Prompt**: Model-agnostic, loaded at runtime from `soa1/prompts/orchestrator.md`
+
+### ⚠️ IMPORTANT: No Modelfile for Orchestrator
+
+**DO NOT create a `.modelfile` for the orchestrator.**
+
+- User will frequently swap orchestrator models for testing
+- System prompt must work with ANY model (Nemotron, Llama, Qwen, Mistral, etc.)
+- Prompt is injected via Ollama API's `system` parameter at runtime
+- This allows hot-swapping models without rebuilding
+
+**phinance-json DOES use a Modelfile** (it's a fixed specialist, not user-swappable).
+
+### When Orchestrator Handles Directly
+
+- General questions (weather, facts, advice)
+- Simple document Q&A (already parsed)
+- Memory recall queries
+- Conversational engagement
+- Follow-up questions on specialist results
+
+### When Orchestrator Delegates
+
+- **Finance specialist**: Transaction analysis, spending insights, budgeting
+- **Budgeting specialist** (future): Budget planning, expense tracking
+- **Knowledge specialist** (future): Deep document indexing, cross-reference
+- **Scheduler specialist** (future): Calendar operations, reminders
+
+### Decision Logic
+
+```python
+if user_intent == "question_only":
+    answer_directly()
+elif user_intent == "specialist_analysis":
+    if user_confirmed_consent:
+        route_to_specialist()
+    else:
+        ask_for_consent()
+else:
+    clarify_intent()
+```
+
+---
+
+## 🎓 Specialist Agents
+
+### Design Philosophy
+
+Specialists are **callable modules**, NOT autonomous agents. They:
+
+- ✅ Accept structured input only
+- ✅ Perform a single, scoped task
+- ✅ Return structured output
+- ✅ Remain silent otherwise
+- ❌ Do NOT handle user intent
+- ❌ Do NOT ask questions
+- ❌ Do NOT enforce consent
+- ❌ Do NOT orchestrate workflows
+- ❌ Do NOT communicate directly with users
+
+### 1. Finance Specialist (Phinance)
+
+**Status**: ✅ **OPERATIONAL** (as of December 25, 2025)
+
+**Purpose**: Financial document analysis and spending insights
+
+**Model**: `phinance-json` (custom Modelfile)
+- Base: Phinance-Phi-3.5-mini-instruct-finance-v0.2
+- Temperature: 0.05 (deterministic)
+- Format: JSON enforced
+- GPU Assignment: GPU 1 (16GB VRAM)
+
+**Input Schema**:
+```json
+{
+  "currency": "USD",
+  "transactions": [
+    {
+      "date": "2024-12-20",
+      "merchant": "Whole Foods",
+      "amount": 127.43,
+      "category": "groceries"
+    }
+  ],
+  "user_request": "Analyze my spending patterns"
+}
+```
+
+**Output Schema**:
+```json
+{
+  "insights": ["The majority of spending is on travel."],
+  "recommendations": ["Review and consolidate travel expenses."],
+  "potential_savings": 0.45
+}
+```
+
+**Components**:
+- `home-ai/agents/phinance_adapter.py` - Payload builder
+- `home-ai/finance-agent/src/parser.py` - PDF transaction extraction
+- `home-ai/finance-agent/src/models.py` - Ollama client wrapper
+- `home-ai/finance-agent/src/sanitizer.py` - JSON validation/repair
+- `home-ai/finance-agent/src/analyzer.py` - Merchant categorization
+
+**Invocation Flow**:
+```
+User uploads PDF → NemoAgent reads structure → Offers finance analysis
+→ User confirms → PDF Parser extracts transactions → Phinance analyzes
+→ NemoAgent presents insights to user
+```
+
+### 2. Budgeting Specialist
+
+**Status**: ⏳ **PLANNED**
+
+**Purpose**: Budget planning, expense tracking, savings goals
+
+**Planned Capabilities**:
+- Monthly/weekly budget creation
+- Category-based spending limits
+- Savings goal tracking
+- Budget vs actual analysis
+- Alerts for overspending
+
+**File Location**: `home-ai/agents/budgeting_agent.py` (currently empty)
+
+### 3. Knowledge Specialist
+
+**Status**: ⏳ **PLANNED**
+
+**Purpose**: Deep document indexing, cross-document reasoning, information retrieval
+
+**Planned Capabilities**:
+- Document embedding and semantic search
+- Cross-document fact extraction
+- Knowledge graph construction
+- Contradiction detection
+- Source attribution
+
+**File Location**: `home-ai/agents/knowledge_agent.py` (currently empty)
+
+### 4. Scheduler Specialist
+
+**Status**: ⏳ **PLANNED**
+
+**Purpose**: Calendar management, reminders, task tracking
+
+**Planned Capabilities**:
+- Calendar event creation/editing
+- Reminder management
+- Task list integration
+- Scheduling conflict detection
+- Natural language date parsing
+
+**File Location**: `home-ai/agents/scheduler_agent.py` (currently empty)
+
+---
+
+## 🔒 Consent Framework
+
+### Core Invariant
+
+> **The assistant MUST NOT initiate any specialist action unless the user has explicitly requested or confirmed it.**
+
+### What Requires Consent
+
+- Financial analysis
+- Deep categorization
+- Report generation
+- Cross-document reasoning
+- Any specialist invocation
+
+### What Does NOT Require Consent
+
+- File ingestion
+- Metadata extraction (filename, size, page count)
+- Header/first-page parsing
+- Structural reading
+- Indexing text for Q&A
+- Preparing options (not executing them)
+
+### Consent Language
+
+**✅ Allowed**:
+- "Do you want me to..."
+- "If you like, I can..."
+- "I can prepare X if that helps"
+
+**❌ Forbidden**:
+- "I'll go ahead and..."
+- "I'll proceed with..."
+- "Next, I will..."
+- "I've started analyzing..."
+
+### Implementation
+
+Enforced by `home-ai/soa1/orchestrator.py`:
+
+```python
+class ConsentState:
+    user_action_confirmed: bool = False
+    confirmed_intent: Optional[UserIntent] = None
+    confirmed_specialists: Set[str] = set()
+
+def require_consent(specialist_name: str):
+    if not can_invoke_specialist(specialist_name):
+        raise PermissionError(f"Consent missing for: {specialist_name}")
+```
+
+### Rules
+
+1. **Silence ≠ Consent**: No action without explicit confirmation
+2. **Upload ≠ Consent**: Receiving files doesn't mean process them
+3. **Document Type ≠ Consent**: Detecting finance PDF doesn't trigger analysis
+4. **Intent ≠ Action**: Understanding what user wants ≠ doing it
+
+Reference: `/home/ryzen/projects/RemAssist/IMPLEMENTATION_GUIDE.md`
+
+---
+
+## 🖥️ GPU Resource Management
+
+### Hardware Configuration
+
+- **Total VRAM**: 32GB (2x 16GB)
+- **Platform**: Intel X670
+- **CUDA Version**: 12.6
+- **Driver**: 580.95.05
+
+### GPU Allocation Strategy
+
+| GPU | Assignment | Model | VRAM | Purpose |
+|-----|-----------|-------|------|---------|
+| GPU 0 | Orchestrator | User-swappable (NemoAgent, etc.) | ~8-9 GB | Main conversation, routing, context |
+| GPU 1 | Specialist Models | phinance-json (2.2 GB) | 2.2 GB | Finance analysis (+ future specialists) |
+
+### Model Loading Strategy
+
+**Current Implementation** (via Ollama):
+- Models loaded on-demand by Ollama
+- Automatic GPU selection by Ollama
+- No explicit GPU pinning in application code
+
+**Future Enhancement**:
+- Explicit CUDA device assignment
+- Model pre-loading for latency reduction
+- Dynamic specialist swapping on GPU 1
+- Resource-aware scheduling
+
+### VRAM Headroom
+
+- GPU 0: 16GB - 8.7GB = **7.3 GB free** (47% utilization)
+- GPU 1: 16GB - 2.2GB = **13.8 GB free** (14% utilization)
+
+**Capacity for future specialists** on GPU 1:
+- Could load 6x phinance-sized models (2.2 GB each)
+- Or 1x 14B model for knowledge/reasoning
+- Or multiple 7B specialists simultaneously
+
+---
+
+## 🔄 Data Flow
+
+### Conversation Flow
+
+```
+1. User sends query
+   ↓
+2. NemoAgent receives query
+   ↓
+3. Memory system searches relevant context
+   ↓
+4. NemoAgent + memory context → classify intent
+   ↓
+5a. If question_only → Answer directly
+5b. If specialist_analysis → Check consent
+   ↓
+6. If consent granted → Route to specialist
+   ↓
+7. Specialist processes and returns structured data
+   ↓
+8. NemoAgent synthesizes response
+   ↓
+9. Write interaction to memory
+   ↓
+10. Return response to user
+```
+
+### Finance Pipeline Flow
+
+```
+1. User uploads PDF statement
+   ↓
+2. Orchestrator: files received, reading structure
+   ↓
+3. NemoAgent: offers intent options (question, summary, finance analysis)
+   ↓
+4. User: "analyze my spending" (implicit finance intent)
+   ↓
+5. Orchestrator: asks for consent
+   ↓
+6. User: "yes" / "proceed"
+   ↓
+7. Orchestrator: grants consent to phinance specialist
+   ↓
+8. PDF Parser: extracts transactions (regex + LLM fallback)
+   ↓
+9. Phinance Adapter: builds structured payload
+   ↓
+10. Phinance Model: generates insights (GPU 1)
+    ↓
+11. Sanitizer: validates/repairs JSON output
+    ↓
+12. Storage: saves transactions.json + analysis.json
+    ↓
+13. NemoAgent: presents insights to user
+    ↓
+14. User can ask follow-up questions (context retained)
+```
+
+---
+
+## 🧠 Memory System
+
+### Purpose
+
+Long-term episodic memory for user context across sessions.
+
+### Architecture
+
+**Backend**: MemLayer (separate service on port 8000)
+- Vector database for semantic search
+- Metadata storage (timestamps, event types)
+- User/profile isolation
+
+**Integration**: `home-ai/soa1/memory.py`
+```python
+class MemoryClient:
+    def search_memory(query: str) -> List[Dict]:
+        # Search relevant past memories
+        
+    def write_memory(text: str, metadata: Dict):
+        # Store new factual memory
+        
+    def health_check() -> bool:
+        # Verify service availability
+```
+
+### Memory Format
+
+```python
+{
+    "text": "[Event]\nquestion: ...\nanswer: ...\nrecorded_at_utc: ...",
+    "metadata": {
+        "event_type": "qa_interaction",
+        "recorded_at_utc": "2025-12-25T02:59:00Z",
+        "recorded_epoch": 1735094340
+    },
+    "timestamp": "2025-12-25T02:59:00Z"
+}
+```
+
+### Usage Patterns
+
+- **Before answering**: Search memories for relevant context
+- **After answering**: Write interaction to memory
+- **Graceful degradation**: Continue if memory service unavailable
+- **Time awareness**: All memories include explicit timestamps
+
+---
+
+## 🌐 API Architecture
+
+### SOA1 API Service
+
+**Port**: 8001  
+**Framework**: FastAPI  
+**Location**: `home-ai/soa1/api.py`
+
+**Endpoints**:
+
+| Endpoint | Method | Purpose | Rate Limit |
+|----------|--------|---------|------------|
+| `/ask` | POST | Query NemoAgent | 100/min |
+| `/ask-with-tts` | POST | Query with audio response | 20/min |
+| `/upload` | POST | PDF upload for processing | 10/min |
+| `/health` | GET | Service health check | Unlimited |
+
+**Request Schema**:
+```json
+{
+  "query": "What did I spend on groceries?",
+  "context": "optional additional context"
+}
+```
+
+**Response Schema**:
+```json
+{
+  "answer": "Based on your Chase statement...",
+  "used_memories": [
+    {"text": "...", "timestamp": "..."}
+  ]
+}
+```
+
+**Error Handling**:
+- Standardized error responses with error codes
+- Comprehensive validation (input, files, queries)
+- Service error isolation (memory, model, TTS)
+- Client IP tracking in logs
+
+**Security**:
+- IP whitelisting (Tailscale network)
+- Rate limiting (token bucket algorithm)
+- Input validation (Pydantic models)
+- Request size limits
+
+Reference: `home-ai/soa1/utils/errors.py`, `home-ai/soa1/utils/rate_limiter.py`
+
+---
+
+## 🔮 Future Extensions
+
+### Planned Features
+
+1. **Multi-User Support**
+   - Per-user memory isolation
+   - Household access controls
+   - Role-based permissions (admin vs member)
+
+2. **Voice Interface**
+   - TTS integration (VibeVoice)
+   - Voice command processing
+   - Multi-speaker TTS
+
+3. **Mobile Companion**
+   - iOS/Android app
+   - Push notifications
+   - Remote access via Tailscale
+
+4. **Advanced Specialists**
+   - Medical document analysis
+   - Legal document review
+   - Home automation integration
+
+5. **Self-Optimizing System**
+   - Daytime: Fast 7B models for immediate tasks
+   - Nighttime: 14-32B models audit decisions, correct errors
+   - Resource-aware scheduling (learn quiet hours)
+   - Unified logging with confidence scores
+
+6. **Monitoring Dashboard**
+   - Active/inactive services with real-time status
+   - Model logs and error tracking
+   - Loaded models (Ollama list with GPU assignments)
+   - GPU utilization and VRAM usage
+   - Service health metrics (uptime, response times)
+   - Recent API calls and request logs
+   - System resources (CPU, memory, disk)
+   - Model inference statistics (latency, throughput)
+
+### Extension Points
+
+**Adding a New Specialist**:
+
+1. Create specialist agent in `home-ai/agents/new_specialist_agent.py`
+2. Define input/output schemas (dataclasses)
+3. Create adapter function for payload building
+4. Add specialist to NemoAgent's system prompt
+5. Update orchestrator intent classification
+6. Create Modelfile if using specialized model
+7. Update this architecture document
+
+**Example Skeleton**:
+```python
+# home-ai/agents/medical_specialist.py
+
+from dataclasses import dataclass
+from typing import List
+
+@dataclass
+class MedicalDocument:
+    doc_type: str  # lab_report, prescription, imaging
+    date: str
+    provider: str
+    content: str
+
+@dataclass
+class MedicalInsight:
+    summary: str
+    key_findings: List[str]
+    action_items: List[str]
+    confidence: float
+
+def analyze_medical_document(doc: MedicalDocument) -> MedicalInsight:
+    """Analyze medical document (requires consent)"""
+    # Implementation
+    pass
+```
+
+---
+
+## 📚 Related Documentation
+
+- **Implementation Guide**: `/home/ryzen/projects/RemAssist/IMPLEMENTATION_GUIDE.md`
+- **File Checklists**: `/home/ryzen/projects/RemAssist/FILE_CHECKLISTS.md`
+- **Services Config**: `/home/ryzen/projects/RemAssist/SERVICES_CONFIG.md`
+- **Next Tasks**: `/home/ryzen/projects/RemAssist/NEXT_TASKS.md`
+- **Session History**: `/home/ryzen/projects/RemAssist/History.md`
+- **Finance MVP Plan**: `/home/ryzen/projects/RemAssist/FINANCE_MVP_PLAN_V2.md`
+
+---
+
+## 🎯 Summary
+
+**SOA1** is a modular, consent-based home assistant with:
+
+- **Orchestrator**: Model-agnostic main orchestrator on GPU 0 (conversation, routing, consent)
+- **Specialists**: Domain experts on GPU 1 (finance operational, others planned)
+- **Memory System**: Long-term episodic context
+- **Consent Framework**: User agency, no surprises
+- **Local-First**: Privacy-focused, no cloud dependencies
+- **Resource-Aware**: Intelligent GPU allocation, 32GB VRAM total
+
+**Current Status** (December 26, 2025):
+- ✅ Finance specialist operational (phinance-json)
+- ✅ Consent framework implemented
+- ✅ PDF parsing pipeline working
+- ✅ SSE event streaming for analysis progress
+- ✅ Per-step timing instrumentation
+- ✅ Monitoring dashboard at /monitoring
+- ✅ Dashboard JSON converter integrated
+- ⚠️ Orchestrator needs model-agnostic system prompt (soa1/prompts/orchestrator.md)
+- ⏳ Other specialists planned but not implemented
+
+**Next Steps**:
+1. Create orchestrator.md system prompt (model-agnostic)
+2. Implement SQLite persistence for transactions
+3. Add model verification endpoint
+4. Test orchestrator routing with multiple scenarios
+5. Implement remaining specialists (budgeting, knowledge, scheduler)
+
+---
+
+*This document is maintained alongside system development. Update after major architectural changes.*

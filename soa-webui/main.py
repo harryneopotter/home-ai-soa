@@ -10,13 +10,17 @@ from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBearer
 import uvicorn
 import os
+from pathlib import Path
 import yaml
 import logging
 import psutil
 import requests
 import socket
 from datetime import datetime
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
+from dataclasses import dataclass, field
+from enum import Enum
+import json
 from pydantic import BaseModel
 
 # Set up logging
@@ -28,6 +32,7 @@ CONFIG_FILE = "config.yaml"
 
 # Security
 security = HTTPBearer()
+
 
 class ServiceStatus(BaseModel):
     name: str
@@ -41,12 +46,14 @@ class ServiceStatus(BaseModel):
     error: Optional[str] = None
     required: bool = True
 
+
 class SystemStatus(BaseModel):
     cpu_usage: float = 0.0
     memory_usage: float = 0.0
     disk_usage: float = 0.0
     uptime: str = ""
     tailscale_ip: Optional[str] = None
+
 
 class Config:
     def __init__(self):
@@ -56,21 +63,22 @@ class Config:
         self.security = {"ip_whitelist": ["100.64.0.0/10"]}
         self.features = {"service_control": True, "monitoring": True}
         self.load_config()
-    
+
     def load_config(self):
         try:
-            with open(CONFIG_FILE, 'r') as f:
+            with open(CONFIG_FILE, "r") as f:
                 config = yaml.safe_load(f) or {}
-                
-            self.server.update(config.get('server', {}))
-            self.services.update(config.get('services', {}))
-            self.tailscale.update(config.get('tailscale', {}))
-            self.security.update(config.get('security', {}))
-            self.features.update(config.get('features', {}))
-            
+
+            self.server.update(config.get("server", {}))
+            self.services.update(config.get("services", {}))
+            self.tailscale.update(config.get("tailscale", {}))
+            self.security.update(config.get("security", {}))
+            self.features.update(config.get("features", {}))
+
             logger.info("Configuration loaded successfully")
         except Exception as e:
             logger.warning(f"Could not load config: {e}")
+
 
 # Load configuration
 config = Config()
@@ -79,52 +87,77 @@ config = Config()
 app = FastAPI(
     title="SOA1 Web UI - Tailscale Edition",
     description="Web interface for monitoring and controlling SOA1 services via Tailscale",
-    version="1.0.0"
+    version="1.0.0",
 )
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Mount static files (use absolute path so startup works regardless of CWD)
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+if not STATIC_DIR.exists():
+    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory="templates")
+
+# Load reports router from file location (robust to import style/package layout)
+try:
+    import importlib.util
+
+    reports_path = Path(__file__).resolve().parent / "reports.py"
+    if reports_path.exists():
+        spec = importlib.util.spec_from_file_location(
+            "soa_webui.reports", str(reports_path)
+        )
+        reports_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(reports_mod)
+        app.include_router(reports_mod.router)
+        logger.info("Reports router loaded from %s", reports_path)
+    else:
+        logger.info("Reports file not found; report endpoints disabled")
+except Exception as exc:
+    logger.info("Reports module import failed: %s", exc)
+
 
 def get_tailscale_ip() -> Optional[str]:
     """Get the Tailscale IP address"""
     try:
         # Try to get Tailscale IP using tailscale command
         import subprocess
-        result = subprocess.run(["tailscale", "ip", "-4"], 
-                              capture_output=True, text=True, timeout=2)
+
+        result = subprocess.run(
+            ["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=2
+        )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     except Exception:
         pass
-    
+
     try:
         # Fallback: check for Tailscale interface
         addrs = psutil.net_if_addrs()
         for interface, addresses in addrs.items():
             for addr in addresses:
-                if 'tailscale' in interface.lower() and addr.family == socket.AF_INET:
+                if "tailscale" in interface.lower() and addr.family == socket.AF_INET:
                     return addr.address
     except Exception:
         pass
-    
+
     return None
+
 
 def is_allowed_ip(client_ip: str) -> bool:
     """Check if client IP is allowed (Tailscale range)"""
-    allowed_ranges = config.security.get('ip_whitelist', ["100.64.0.0/10"])
-    
+    allowed_ranges = config.security.get("ip_whitelist", ["100.64.0.0/10"])
+
     # Always allow localhost
-    if client_ip in ['127.0.0.1', 'localhost', '::1']:
+    if client_ip in ["127.0.0.1", "localhost", "::1"]:
         return True
-    
+
     # Check if IP is in allowed ranges
     from ipaddress import ip_address, ip_network
-    
+
     try:
         client_ip_obj = ip_address(client_ip)
         for ip_range in allowed_ranges:
-            if '/' in ip_range:
+            if "/" in ip_range:
                 network = ip_network(ip_range, strict=False)
                 if client_ip_obj in network:
                     return True
@@ -132,44 +165,77 @@ def is_allowed_ip(client_ip: str) -> bool:
                 return True
     except Exception:
         pass
-    
+
     return False
+
 
 def get_service_status() -> List[ServiceStatus]:
     """Get status of all SOA1 services"""
     services = []
-    
+
     # Define services to monitor
     service_definitions = [
-        {"name": "soa1_api", "display": "SOA1 API", "port": 8001, "url": config.services.get("api", "http://localhost:8001"), "required": True},
-        {"name": "soa1_web", "display": "SOA1 Web Interface", "port": 8002, "url": config.services.get("web_interface", "http://localhost:8002"), "required": False},
-        {"name": "service_monitor", "display": "Service Monitor", "port": 8003, "url": config.services.get("service_monitor", "http://localhost:8003"), "required": False},
-        {"name": "memlayer", "display": "Memlayer", "port": 8000, "url": config.services.get("memlayer", "http://localhost:8000"), "required": True},
-        {"name": "ollama", "display": "Ollama (LLM)", "port": 11434, "url": "http://localhost:11434", "required": True},
+        {
+            "name": "soa1_api",
+            "display": "SOA1 API",
+            "port": 8001,
+            "url": config.services.get("api", "http://localhost:8001"),
+            "required": True,
+        },
+        {
+            "name": "soa1_web",
+            "display": "SOA1 Web Interface",
+            "port": 8002,
+            "url": config.services.get("web_interface", "http://localhost:8002"),
+            "required": False,
+        },
+        {
+            "name": "service_monitor",
+            "display": "Service Monitor",
+            "port": 8003,
+            "url": config.services.get("service_monitor", "http://localhost:8003"),
+            "required": False,
+        },
+        {
+            "name": "memlayer",
+            "display": "Memlayer",
+            "port": 8000,
+            "url": config.services.get("memlayer", "http://localhost:8000"),
+            "required": True,
+        },
+        {
+            "name": "ollama",
+            "display": "Ollama (LLM)",
+            "port": 11434,
+            "url": "http://localhost:11434",
+            "required": True,
+        },
     ]
-    
+
     for service_def in service_definitions:
         service = ServiceStatus(
             name=service_def["name"],
             display_name=service_def["display"],
             port=service_def["port"],
             url=service_def["url"],
-            required=service_def["required"]
+            required=service_def["required"],
         )
-        
+
         try:
             # Check if process is running
-            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
                 try:
-                    cmdline = ' '.join(proc.info['cmdline'] or [])
+                    cmdline = " ".join(proc.info["cmdline"] or [])
                     if service.name in cmdline or str(service.port) in cmdline:
-                        service.pid = proc.info['pid']
+                        service.pid = proc.info["pid"]
                         service.cpu_usage = proc.cpu_percent(interval=0.1)
-                        service.memory_usage = proc.memory_info().rss / 1024 / 1024  # MB
+                        service.memory_usage = (
+                            proc.memory_info().rss / 1024 / 1024
+                        )  # MB
                         break
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
-            
+
             # Try to connect to the service
             if service.pid:
                 try:
@@ -182,67 +248,83 @@ def get_service_status() -> List[ServiceStatus]:
                     service.status = "unresponsive"
             else:
                 service.status = "stopped"
-                
+
         except Exception as e:
             service.status = "error"
             service.error = str(e)
-        
+
         services.append(service)
-    
+
     return services
 
+
 def get_system_status() -> SystemStatus:
+    # ensure FINANCE_REPORTS_DIR is configured
+    global FINANCE_REPORTS_DIR
+    if "FINANCE_REPORTS_DIR" not in globals():
+        from pathlib import Path
+
+        FINANCE_REPORTS_DIR = Path("home-ai/finance-agent/data/reports")
+    return (
+        get_system_status.__wrapped__()
+        if hasattr(get_system_status, "__wrapped__")
+        else get_system_status()
+    )
     """Get overall system status"""
     status = SystemStatus()
-    
+
     try:
         # CPU usage
         status.cpu_usage = psutil.cpu_percent(interval=1)
-        
+
         # Memory usage
         memory = psutil.virtual_memory()
         status.memory_usage = memory.percent
-        
+
         # Disk usage
-        disk = psutil.disk_usage('/')
+        disk = psutil.disk_usage("/")
         status.disk_usage = disk.percent
-        
+
         # Uptime
         boot_time = datetime.fromtimestamp(psutil.boot_time())
         uptime = datetime.now() - boot_time
-        status.uptime = str(uptime).split('.')[0]
-        
+        status.uptime = str(uptime).split(".")[0]
+
         # Tailscale IP
         status.tailscale_ip = get_tailscale_ip()
-        
+
     except Exception as e:
         logger.error(f"Error getting system status: {e}")
-    
+
     return status
+
 
 def check_access(client_ip: str):
     """Check if client IP is allowed to access"""
     if not config.tailscale.get("enabled", True):
         return True
-    
+
     return is_allowed_ip(client_ip)
+
 
 @app.get("/")
 def home(request: Request):
     """Main dashboard"""
     client_ip = request.client.host
-    
+
     if not check_access(client_ip):
         raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
-    
+
     services = get_service_status()
     system_status = get_system_status()
-    
+
     # Calculate overall status
     required_services = [s for s in services if s.required]
     running_required = [s for s in required_services if s.status == "running"]
-    overall_status = "operational" if len(running_required) == len(required_services) else "degraded"
-    
+    overall_status = (
+        "operational" if len(running_required) == len(required_services) else "degraded"
+    )
+
     return templates.TemplateResponse(
         "index.html",
         {
@@ -255,21 +337,22 @@ def home(request: Request):
             "running_required": len(running_required),
             "tailscale_enabled": config.tailscale.get("enabled", True),
             "tailscale_ip": system_status.tailscale_ip,
-            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        },
     )
+
 
 @app.get("/services")
 def services_page(request: Request):
     """Detailed services page"""
     client_ip = request.client.host
-    
+
     if not check_access(client_ip):
         raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
-    
+
     services = get_service_status()
     system_status = get_system_status()
-    
+
     return templates.TemplateResponse(
         "services.html",
         {
@@ -277,38 +360,39 @@ def services_page(request: Request):
             "title": "SOA1 Services",
             "services": services,
             "system_status": system_status,
-            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        },
     )
+
 
 @app.get("/status")
 def status_page(request: Request):
     """System status page"""
     client_ip = request.client.host
-    
+
     if not check_access(client_ip):
         raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
-    
+
     system_status = get_system_status()
     services = get_service_status()
-    
+
     # Get detailed system info
     try:
         # Network info
         net_io = psutil.net_io_counters()
-        
+
         # Disk info
         disk_partitions = psutil.disk_partitions()
-        
+
         # Process count
         process_count = len(psutil.pids())
-        
+
     except Exception as e:
         logger.error(f"Error getting detailed system info: {e}")
         net_io = None
         disk_partitions = []
         process_count = 0
-    
+
     return templates.TemplateResponse(
         "status.html",
         {
@@ -319,37 +403,42 @@ def status_page(request: Request):
             "net_io": net_io,
             "disk_partitions": disk_partitions,
             "process_count": process_count,
-            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        },
     )
+
 
 @app.get("/api/services")
 def api_services():
     """API endpoint for service status"""
     services = get_service_status()
     system_status = get_system_status()
-    
+
     return {
-        "services": [{
-            "name": s.name,
-            "display_name": s.display_name,
-            "status": s.status,
-            "port": s.port,
-            "url": s.url,
-            "pid": s.pid,
-            "cpu_usage": s.cpu_usage,
-            "memory_usage": s.memory_usage,
-            "error": s.error,
-            "required": s.required
-        } for s in services],
+        "services": [
+            {
+                "name": s.name,
+                "display_name": s.display_name,
+                "status": s.status,
+                "port": s.port,
+                "url": s.url,
+                "pid": s.pid,
+                "cpu_usage": s.cpu_usage,
+                "memory_usage": s.memory_usage,
+                "error": s.error,
+                "required": s.required,
+            }
+            for s in services
+        ],
         "system": {
             "cpu_usage": system_status.cpu_usage,
             "memory_usage": system_status.memory_usage,
             "disk_usage": system_status.disk_usage,
             "uptime": system_status.uptime,
-            "tailscale_ip": system_status.tailscale_ip
-        }
+            "tailscale_ip": system_status.tailscale_ip,
+        },
     }
+
 
 @app.get("/health")
 def health():
@@ -357,15 +446,302 @@ def health():
     return {
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat(),
-        "tailscale_ip": get_tailscale_ip()
+        "tailscale_ip": get_tailscale_ip(),
     }
+
+
+# =============================================================================
+# Finance Analysis Endpoints
+# =============================================================================
+
+import threading
+import sys
+
+sys.path.insert(0, "/home/ryzen/projects")
+
+try:
+    from home_ai.finance_agent.src import storage as fa_storage
+
+    FA_STORAGE_AVAILABLE = True
+except ImportError:
+    FA_STORAGE_AVAILABLE = False
+    logger.warning("Finance storage module not available")
+
+_analysis_jobs: Dict[str, Dict[str, Any]] = {}
+_analysis_lock = threading.Lock()
+
+
+class AnalyzeRequest(BaseModel):
+    doc_id: str
+
+
+def _get_job(doc_id: str) -> Optional[Dict[str, Any]]:
+    with _analysis_lock:
+        if doc_id in _analysis_jobs:
+            return _analysis_jobs[doc_id].copy()
+    if FA_STORAGE_AVAILABLE:
+        try:
+            fa_storage.init_db()
+            job = fa_storage.load_job_by_doc_id(doc_id)
+            if job:
+                with _analysis_lock:
+                    _analysis_jobs[doc_id] = dict(job)
+                return dict(job)
+        except Exception as e:
+            logger.error(f"Failed to load job from DB: {e}")
+    return None
+
+
+def _save_job(job: Dict[str, Any]):
+    doc_id = job.get("doc_id")
+    with _analysis_lock:
+        _analysis_jobs[doc_id] = job.copy()
+    if FA_STORAGE_AVAILABLE:
+        try:
+            fa_storage.init_db()
+            fa_storage.save_analysis_job(job)
+        except Exception as e:
+            logger.error(f"Failed to save job to DB: {e}")
+
+
+def _run_phinance_analysis(job: Dict[str, Any], pdf_path: str):
+    doc_id = job["doc_id"]
+    job_id = job["job_id"]
+    logger.info(f"Starting phinance analysis for {doc_id}")
+
+    try:
+        job["status"] = "running"
+        job["started_at"] = datetime.utcnow().isoformat()
+        _save_job(job)
+
+        from home_ai.finance_agent.src.parser import parse_apple_card_statement
+        from home_ai.finance_agent.src.models import call_phinance_insights
+
+        transactions = parse_apple_card_statement(pdf_path)
+        logger.info(f"Parsed {len(transactions)} transactions from {pdf_path}")
+
+        if transactions:
+            insights_result = call_phinance_insights(transactions)
+
+            reports_dir = Path(
+                f"/home/ryzen/projects/home-ai/finance-agent/data/reports/{doc_id}"
+            )
+            reports_dir.mkdir(parents=True, exist_ok=True)
+
+            with open(reports_dir / "transactions.json", "w") as f:
+                json.dump(transactions, f, indent=2, default=str)
+
+            with open(reports_dir / "analysis.json", "w") as f:
+                json.dump(insights_result, f, indent=2, default=str)
+
+            job["status"] = "completed"
+            job["completed_at"] = datetime.utcnow().isoformat()
+            job["transaction_count"] = len(transactions)
+            job["reports_dir"] = str(reports_dir)
+        else:
+            job["status"] = "completed"
+            job["completed_at"] = datetime.utcnow().isoformat()
+            job["transaction_count"] = 0
+            job["warning"] = "No transactions found"
+
+        _save_job(job)
+        logger.info(
+            f"Analysis completed for {doc_id}: {len(transactions)} transactions"
+        )
+
+    except Exception as e:
+        logger.error(f"Analysis failed for {doc_id}: {e}")
+        job["status"] = "failed"
+        job["error"] = str(e)
+        job["completed_at"] = datetime.utcnow().isoformat()
+        _save_job(job)
+
+
+@app.post("/analyze-stage-ab")
+async def analyze_stage_ab(req: AnalyzeRequest):
+    """Stage A/B: Extract metadata and structure preview from uploaded document."""
+    doc_id = req.doc_id
+    logger.info(f"Stage A/B analysis requested for {doc_id}")
+
+    uploads_dir = Path("/home/ryzen/projects/home-ai/finance-agent/data/uploads")
+    pdf_files = list(uploads_dir.glob(f"{doc_id}*.pdf"))
+
+    if not pdf_files:
+        pdf_files = list(uploads_dir.glob(f"*{doc_id}*.pdf"))
+
+    if not pdf_files:
+        raise HTTPException(
+            status_code=404, detail=f"PDF not found for doc_id: {doc_id}"
+        )
+
+    pdf_path = pdf_files[0]
+
+    try:
+        import fitz
+
+        doc = fitz.open(str(pdf_path))
+        pages = len(doc)
+        first_page_text = doc[0].get_text()[:2000] if pages > 0 else ""
+        doc.close()
+    except Exception as e:
+        logger.error(f"Failed to read PDF: {e}")
+        pages = 0
+        first_page_text = ""
+
+    institution = "Unknown"
+    statement_type = "unknown"
+    if "apple card" in first_page_text.lower():
+        institution = "Apple Card"
+        statement_type = "apple_card"
+    elif "chase" in first_page_text.lower():
+        institution = "Chase"
+        statement_type = "bank_statement"
+
+    job_id = f"job-{doc_id}-{datetime.utcnow().strftime('%H%M%S')}"
+    job = {
+        "job_id": job_id,
+        "doc_id": doc_id,
+        "status": "pending",
+        "consent_given": 0,
+        "filename": pdf_path.name,
+        "pages": pages,
+        "institution": institution,
+        "statement_type": statement_type,
+        "pdf_path": str(pdf_path),
+    }
+    _save_job(job)
+
+    return {
+        "doc_id": doc_id,
+        "filename": pdf_path.name,
+        "pages": pages,
+        "institution": institution,
+        "statement_type": statement_type,
+        "synopsis": f"Document appears to be a {institution} statement with {pages} pages.",
+        "key_sections": ["Transactions", "Summary", "Account Details"],
+        "timeframe": None,
+    }
+
+
+@app.post("/analyze-confirm")
+async def analyze_confirm(req: AnalyzeRequest):
+    """Confirm and start full analysis after user consent."""
+    doc_id = req.doc_id
+    logger.info(f"Analysis confirmation for {doc_id}")
+
+    job = _get_job(doc_id)
+
+    if not job:
+        uploads_dir = Path("/home/ryzen/projects/home-ai/finance-agent/data/uploads")
+        pdf_files = list(uploads_dir.glob(f"*{doc_id}*.pdf"))
+        if not pdf_files:
+            raise HTTPException(
+                status_code=404, detail="Job record not found; upload required"
+            )
+
+        pdf_path = pdf_files[0]
+        job_id = f"job-{doc_id}-{datetime.utcnow().strftime('%H%M%S')}"
+        job = {
+            "job_id": job_id,
+            "doc_id": doc_id,
+            "status": "pending",
+            "consent_given": 1,
+            "pdf_path": str(pdf_path),
+        }
+        _save_job(job)
+
+    if job.get("consent_given") != 1:
+        if FA_STORAGE_AVAILABLE:
+            try:
+                fa_storage.init_db()
+                db_job = fa_storage.load_job_by_doc_id(doc_id)
+                if db_job and db_job.get("consent_given") == 1:
+                    job["consent_given"] = 1
+                    _save_job(job)
+            except Exception:
+                pass
+
+    if job.get("consent_given") != 1:
+        return {
+            "status": "consent_required",
+            "message": "Consent required before analysis",
+        }
+
+    if job.get("status") == "running":
+        return {"status": "already_running", "job_id": job.get("job_id")}
+
+    if job.get("status") == "completed":
+        return {"status": "already_completed", "job_id": job.get("job_id")}
+
+    pdf_path = job.get("pdf_path")
+    if not pdf_path:
+        uploads_dir = Path("/home/ryzen/projects/home-ai/finance-agent/data/uploads")
+        pdf_files = list(uploads_dir.glob(f"*{doc_id}*.pdf"))
+        if pdf_files:
+            pdf_path = str(pdf_files[0])
+            job["pdf_path"] = pdf_path
+
+    if not pdf_path or not Path(pdf_path).exists():
+        raise HTTPException(status_code=404, detail="PDF file not found")
+
+    thread = threading.Thread(target=_run_phinance_analysis, args=(job, pdf_path))
+    thread.start()
+
+    return {"status": "started", "job_id": job.get("job_id"), "doc_id": doc_id}
+
+
+@app.get("/analysis-status/{doc_id}")
+async def analysis_status(doc_id: str):
+    """Get the current status of an analysis job."""
+    job = _get_job(doc_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Analysis job not found")
+
+    response = {
+        "doc_id": doc_id,
+        "job_id": job.get("job_id"),
+        "status": job.get("status", "unknown"),
+    }
+
+    if job.get("status") == "completed":
+        response["completed_at"] = job.get("completed_at")
+        response["transaction_count"] = job.get("transaction_count", 0)
+        response["reports_dir"] = job.get("reports_dir")
+    elif job.get("status") == "failed":
+        response["error"] = job.get("error")
+    elif job.get("status") == "running":
+        response["started_at"] = job.get("started_at")
+
+    return response
+
+
+@app.post("/api/chat")
+async def api_chat(request: Request):
+    """Proxy chat requests to SOA1 API."""
+    try:
+        body = await request.json()
+        soa1_url = config.services.get("api", "http://localhost:8001")
+        resp = requests.post(f"{soa1_url}/api/chat", json=body, timeout=120)
+        return resp.json()
+    except Exception as e:
+        logger.error(f"Chat proxy error: {e}")
+        return {
+            "response": "Sorry, I encountered an error processing your request.",
+            "error": str(e),
+        }
+
+
+# =============================================================================
+# End Finance Analysis Endpoints
+# =============================================================================
+
 
 # Create default templates if they don't exist
 def create_default_templates():
     """Create default HTML templates"""
     template_dir = "templates"
     os.makedirs(template_dir, exist_ok=True)
-    
+
     # Main template
     main_template = """<!DOCTYPE html>
 <html>
@@ -701,10 +1077,10 @@ def create_default_templates():
     </div>
 </body>
 </html>"""
-    
+
     with open(f"{template_dir}/index.html", "w") as f:
         f.write(main_template)
-    
+
     # Services template
     services_template = """<!DOCTYPE html>
 <html>
@@ -894,10 +1270,10 @@ def create_default_templates():
     </div>
 </body>
 </html>"""
-    
+
     with open(f"{template_dir}/services.html", "w") as f:
         f.write(services_template)
-    
+
     # Status template
     status_template = """<!DOCTYPE html>
 <html>
@@ -1097,9 +1473,10 @@ def create_default_templates():
     </div>
 </body>
 </html>"""
-    
+
     with open(f"{template_dir}/status.html", "w") as f:
         f.write(status_template)
+
 
 # Create default config if it doesn't exist
 if not os.path.exists(CONFIG_FILE):
@@ -1146,19 +1523,20 @@ create_default_templates()
 
 if __name__ == "__main__":
     logger.info("🚀 Starting SOA1 Web UI - Tailscale Edition...")
-    logger.info(f"🌐 Dashboard will be available at http://{config.server['host']}:{config.server['port']}")
-    
+    logger.info(
+        f"🌐 Dashboard will be available at http://{config.server['host']}:{config.server['port']}"
+    )
+
     # Get Tailscale IP
     tailscale_ip = get_tailscale_ip()
     if tailscale_ip:
         logger.info(f"🔒 Tailscale IP: {tailscale_ip}")
-        logger.info(f"🌐 Tailscale access: http://{tailscale_ip}:{config.server['port']}")
+        logger.info(
+            f"🌐 Tailscale access: http://{tailscale_ip}:{config.server['port']}"
+        )
     else:
         logger.warning("⚠️ Tailscale IP not detected. Make sure Tailscale is running.")
-    
+
     uvicorn.run(
-        app,
-        host=config.server["host"],
-        port=config.server["port"],
-        reload=False
+        app, host=config.server["host"], port=config.server["port"], reload=False
     )

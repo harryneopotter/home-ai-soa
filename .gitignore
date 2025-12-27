@@ -1,5 +1,7 @@
 # Git ignore patterns for home-ai projects
 
+.not-needed/
+oh-my-opencode/
 # Python
 __pycache__/
 *.py[cod]
@@ -134,5 +136,4 @@ migrationissues/
 FILE_CHECKLISTS.md
 FINANCE_MVP_PLAN_V2.md
 IMPLEMENTATION_GUIDE.md
-RemAssist/FILE_CHECKLISTS.md
-RemAssist/IMPLEMENTATION_GUIDE.md
+*init*.*

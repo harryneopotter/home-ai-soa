@@ -1,0 +1,42 @@
+# SOA1 WebUI Service - Systemd Unit File
+# 
+# Installation:
+#   sudo cp RemAssist/soa-webui.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable soa-webui
+#   sudo systemctl start soa-webui
+#
+# Logs:
+#   journalctl -u soa-webui -f
+
+[Unit]
+Description=SOA1 Web UI (FastAPI)
+After=network.target soa1-api.service
+Wants=soa1-api.service
+
+[Service]
+Type=simple
+User=ryzen
+Group=ryzen
+WorkingDirectory=/home/ryzen/projects/soa-webui
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/ryzen/projects:/home/ryzen/projects/home-ai
+ExecStart=/usr/bin/python3 /home/ryzen/projects/soa-webui/main.py
+Restart=on-failure
+RestartSec=5
+
+# Resource limits
+MemoryMax=1G
+CPUQuota=100%
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ryzen/projects/home-ai/finance-agent/data
+ReadWritePaths=/home/ryzen/projects/home-ai/logs
+ReadWritePaths=/tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

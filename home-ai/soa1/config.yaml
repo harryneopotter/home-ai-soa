@@ -11,22 +11,46 @@ memlayer:
 model:
   provider: "ollama"
   base_url: "http://localhost:11434"
-  model_name: "qwen2.5:7b-instruct"
+  model_name: "NemoAgent:latest"
   temperature: 0.3
   max_tokens: 512
+  num_ctx: 32768
+  verbose_logging: true
 
-agent:
-  system_prompt: |
-    You are SOA1 ("Son of Anton"), a local-only home assistant agent running on a private server.
-    - You NEVER mention any external cloud or internet.
-    - You can access a long-term memory system that stores and retrieves facts for the user.
-    - You are concise but helpful.
-    - You try to ground your answers in stored memories when relevant.
-    - You can speak responses using text-to-speech when requested.
+orchestrator:
+  model_name: "NemoAgent:latest"
+  temperature: 0.3
+  max_tokens: 512
+  num_ctx: 32768
+  # System prompt loaded from prompts/orchestrator.md (model-agnostic)
+  # To override: set prompt_file: "path/to/custom.md"
 
-# TTS Configuration
+specialists:
+  finance:
+    enabled: true
+    model_name: "phinance-json:latest"
+    temperature: 0.05
+    system_prompt: |
+      You are a finance analysis specialist. Analyze transaction data and provide structured insights.
+      
+      Output MUST be valid JSON with this exact structure:
+      {
+        "insights": ["insight 1", "insight 2"],
+        "recommendations": ["recommendation 1", "recommendation 2"],
+        "potential_savings": 0.0
+      }
+      
+      Focus on:
+      - Spending patterns and trends
+      - Unusual or high-cost transactions
+      - Category-based analysis
+      - Actionable recommendations
+      - Quantifiable savings opportunities
+      
+      Always use USD currency. Be concise and specific.
+
 tts:
-  enabled: true
+  enabled: false
   model: "microsoft/VibeVoice-Realtime-0.5B"
   speaker_id: 0
   output_dir: "/tmp/soa1_tts"

@@ -1,9 +1,6 @@
 """Core orchestration and consent enforcement for the Daily Home Assistant.
 
-This module implements the state machine mandated by IMPLEMENTATION_GUIDE.md and
-FILE_CHECKLISTS.md. It never performs parsing or specialist work directly; it is
-strictly responsible for tracking intent, gating actions, and emitting structured
-messages back to the UI layer.
+Mandated by IMPLEMENTATION_GUIDE.md and FILE_CHECKLISTS.md.
 """
 
 from __future__ import annotations
@@ -19,8 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 class ConversationState(enum.Enum):
-    """High-level phases for the primary assistant."""
-
     IDLE = enum.auto()
     FILES_RECEIVED = enum.auto()
     READING_STRUCTURE = enum.auto()
@@ -32,8 +27,6 @@ class ConversationState(enum.Enum):
 
 
 class UserIntent(enum.Enum):
-    """Explicit user intent axis (doc type is separate)."""
-
     QUESTION_ONLY = enum.auto()
     SUMMARY = enum.auto()
     EXTRACTION = enum.auto()
@@ -43,8 +36,6 @@ class UserIntent(enum.Enum):
 
 @dataclass
 class ConsentState:
-    """Tracks whether the user has actually granted permission."""
-
     user_action_confirmed: bool = False
     confirmed_intent: Optional[UserIntent] = None
     confirmed_specialists: Set[str] = field(default_factory=set)
@@ -58,8 +49,6 @@ class ConsentState:
 
 
 class Orchestrator:
-    """Primary state machine and consent gatekeeper."""
-
     def __init__(self) -> None:
         self.state: ConversationState = ConversationState.IDLE
         self.consent = ConsentState()
@@ -67,18 +56,13 @@ class Orchestrator:
         self.pending_intent_offer: Optional[UserIntent] = None
         self._recent_files: List[Path] = []
 
-    # ------------------------------------------------------------------
-    # Public interface required by FILE_CHECKLISTS.md
-    # ------------------------------------------------------------------
     def handle_upload(self, files: List[Path]) -> List[Dict]:
-        """Handle a batch of uploaded files (metadata-level only)."""
-
         if not files:
             return [
                 self.emit_user_message(
                     "ERROR",
                     {
-                        "text": "I didn’t detect any files. Please try uploading again.",
+                        "text": "I didn't detect any files. Please try uploading again.",
                     },
                 )
             ]
@@ -86,6 +70,7 @@ class Orchestrator:
         self._recent_files = files
         self.state = ConversationState.WAITING_INTENT
         self.pending_specialist = None
+        self.pending_intent_offer = None
         logger.debug("Files received: %s", [f.name for f in files])
 
         return [
@@ -93,7 +78,7 @@ class Orchestrator:
                 "ACK",
                 {
                     "text": (
-                        "I’ve received the files and I’m reading their structure.\n\n"
+                        "I've received files and I'm reading their structure.\n\n"
                         "You can:\n"
                         "• ask a specific question\n"
                         "• get a quick summary\n"
@@ -108,111 +93,128 @@ class Orchestrator:
         ]
 
     def handle_user_message(self, text: str) -> List[Dict]:
-        """Process a user utterance and emit structured responses."""
-
         text_normalized = text.strip().lower()
         if not text_normalized:
             return [
                 self.emit_user_message(
                     "WAITING",
                     {
-                        "text": "I’m ready whenever you are. Nothing has been processed beyond basic reading."
+                        "text": "I'm ready whenever you are. Nothing has been processed beyond basic reading."
                     },
                 )
             ]
 
         messages: List[Dict] = []
 
-        # 1. Check for confirmation to a pending consent request.
-        if self.pending_specialist:
+        if self.pending_intent_offer:
             if self._text_confirms_request(text_normalized):
-                self._grant_specialist_consent()
+                intent = self.pending_intent_offer
+                specialist = self.pending_specialist
+
+                if intent == UserIntent.SPECIALIST_ANALYSIS and specialist:
+                    self._grant_specialist_consent()
+                    msg = f"Confirmed. If you like, I can involve the {specialist.title()} specialist now."
+                else:
+                    self.consent.user_action_confirmed = True
+                    self.consent.confirmed_intent = intent
+                    self.consent.last_updated = datetime.utcnow()
+                    msg = f"Confirmed. If you like, I can prepare a {intent.name.lower()} for you now."
+
                 messages.append(
                     self.emit_user_message(
                         "CONSENT_CONFIRMED",
                         {
-                            "text": f"Great. I’ll be ready to involve the {self.pending_specialist.title()} specialist when you ask.",
-                            "specialist": self.pending_specialist,
+                            "text": msg,
+                            "intent": intent.name,
+                            "specialist": specialist,
                         },
                     )
                 )
+                self.pending_intent_offer = None
                 self.pending_specialist = None
                 self.state = ConversationState.INTENT_CONFIRMED
+                return messages
             elif self._text_denies_request(text_normalized):
                 messages.append(
                     self.emit_user_message(
                         "CONSENT_DENIED",
                         {
-                            "text": "No problem. I’ll keep things here unless you change your mind.",
-                            "specialist": self.pending_specialist,
+                            "text": "No problem. Nothing happens unless you say so. I'll keep things here unless you change your mind.",
                         },
                     )
                 )
+                self.pending_intent_offer = None
                 self.pending_specialist = None
                 self.consent.user_action_confirmed = False
-                self.consent.confirmed_specialists.clear()
                 self.state = ConversationState.WAITING_INTENT
                 return messages
             else:
-                # Clarify that a direct yes/no tied to the request is needed.
                 messages.append(
                     self.emit_user_message(
                         "CLARIFY",
                         {
-                            "text": "Just to confirm, should I involve the finance specialist? You can say yes or no.",
-                            "specialist": self.pending_specialist,
+                            "text": "I've received your message, but I'm waiting for your confirmation. Do you want me to proceed with the requested action? You can say yes or no.",
                         },
                     )
                 )
                 return messages
 
-        # 2. No pending specialist: infer requested intent.
+        is_q = self._is_interrogative(text_normalized)
         inferred_intent = self._infer_intent(text_normalized)
-        if inferred_intent == UserIntent.SPECIALIST_ANALYSIS:
-            # Ask for explicit permission before enabling specialist use.
-            self.pending_specialist = "phinance"
-            self.pending_intent_offer = UserIntent.SPECIALIST_ANALYSIS
+
+        if is_q or inferred_intent == UserIntent.QUESTION_ONLY:
+            self.consent.user_action_confirmed = False
+            self.consent.confirmed_intent = UserIntent.QUESTION_ONLY
+            self.state = ConversationState.INTENT_CONFIRMED
+            messages.append(
+                self.emit_user_message(
+                    "QUESTION_REPLY",
+                    {
+                        "text": "Thanks. Let me know specifics you need, or ask about anything in the uploaded files.",
+                        "intent": UserIntent.QUESTION_ONLY.name,
+                    },
+                )
+            )
+            return messages
+
+        if inferred_intent:
+            self.pending_intent_offer = inferred_intent
+            if inferred_intent == UserIntent.SPECIALIST_ANALYSIS:
+                self.pending_specialist = "phinance"
+                offer_text = "If you like, I can involve the finance specialist for deeper insights. Do you want me to proceed?"
+            else:
+                offer_text = f"If you like, I can prepare a {inferred_intent.name.lower()} for you. Do you want me to proceed?"
+
             messages.append(
                 self.emit_user_message(
                     "CONSENT_REQUEST",
                     {
-                        "text": "If you like, I can involve the finance specialist for deeper insights. Should I proceed?",
-                        "specialist": "phinance",
+                        "text": offer_text,
+                        "intent": inferred_intent.name,
                     },
                 )
             )
             self.state = ConversationState.WAITING_INTENT
             return messages
 
-        if inferred_intent is None:
-            # Treat as question-only unless stated otherwise.
-            inferred_intent = UserIntent.QUESTION_ONLY
-
-        self.consent.user_action_confirmed = inferred_intent != UserIntent.QUESTION_ONLY
-        if self.consent.user_action_confirmed:
-            self.consent.confirmed_intent = inferred_intent
-            self.consent.last_updated = datetime.utcnow()
+        self.consent.user_action_confirmed = False
+        self.consent.confirmed_intent = UserIntent.QUESTION_ONLY
         self.state = ConversationState.INTENT_CONFIRMED
-
         messages.append(
             self.emit_user_message(
                 "QUESTION_REPLY",
                 {
-                    "text": "Thanks. Go ahead and let me know the specifics you need, or ask about anything in the uploaded files.",
-                    "intent": inferred_intent.name,
+                    "text": "If you like, I can answer your questions about these files. Let me know what you need.",
+                    "intent": UserIntent.QUESTION_ONLY.name,
                 },
             )
         )
         return messages
 
     def emit_user_message(self, kind: str, payload: Dict) -> Dict:
-        """Helper to standardize outbound messages."""
-
         return {"type": kind, **payload}
 
     def can_invoke_specialist(self, name: str) -> bool:
-        """Check whether a specialist invocation is currently allowed."""
-
         allowed = (
             self.consent.user_action_confirmed
             and name in self.consent.confirmed_specialists
@@ -221,15 +223,10 @@ class Orchestrator:
         return allowed
 
     def require_consent(self, name: str) -> None:
-        """Raise if consent is missing for the requested specialist."""
-
         if not self.can_invoke_specialist(name):
             logger.warning("Blocked specialist call without consent: %s", name)
             raise PermissionError(f"Consent missing for specialist: {name}")
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
     def _intent_options_message(self) -> Dict:
         options = [
             {"label": "Ask a question", "intent": UserIntent.QUESTION_ONLY.name},
@@ -248,12 +245,21 @@ class Orchestrator:
 
     @staticmethod
     def _text_confirms_request(text: str) -> bool:
-        confirmations = {"yes", "sure", "please do", "go ahead", "do it", "confirm"}
+        confirmations = {
+            "yes",
+            "sure",
+            "please do",
+            "do it",
+            "confirm",
+            "proceed",
+            "ok",
+            "okay",
+        }
         return text in confirmations
 
     @staticmethod
     def _text_denies_request(text: str) -> bool:
-        denials = {"no", "not now", "don’t", "do not", "stop"}
+        denials = {"no", "not now", "don't", "do not", "stop", "cancel"}
         return text in denials
 
     def _grant_specialist_consent(self) -> None:
@@ -265,15 +271,39 @@ class Orchestrator:
         )
 
     @staticmethod
+    def _is_interrogative(text: str) -> bool:
+        interrogatives = {
+            "what",
+            "when",
+            "where",
+            "why",
+            "how",
+            "who",
+            "which",
+            "can",
+            "could",
+            "is",
+            "are",
+            "do",
+            "does",
+            "will",
+            "would",
+            "should",
+            "may",
+            "might",
+        }
+        words = text.split()
+        if not words:
+            return False
+        return words[0] in interrogatives or text.endswith("?")
+
+    @staticmethod
     def _infer_intent(text: str) -> Optional[UserIntent]:
-        if any(keyword in text for keyword in ["summary", "summarize"]):
+        if any(keyword in text for keyword in ["summary", "summarize", "recap"]):
             return UserIntent.SUMMARY
-        if any(
-            keyword in text
-            for keyword in ["extract", "key info", "deadlines", "due date"]
-        ):
+        if any(keyword in text for keyword in ["extract", "key info", "deadlines"]):
             return UserIntent.EXTRACTION
-        if "action" in text:
+        if any(keyword in text for keyword in ["action", "todo", "task"]):
             return UserIntent.ACTION_ITEMS
         if any(
             keyword in text
