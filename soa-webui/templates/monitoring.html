@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>{{ title }}</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        'bg-brutal-dark': '#000000',
+                        'text-brutal-light': '#FFFFFF',
+                        'text-brutal-gray': '#AAAAAA',
+                        'accent-neon-orange': '#FF6600',
+                        'accent-green': '#00FF66',
+                        'accent-red': '#FF3333',
+                    },
+                    fontFamily: {
+                        mono: ["'Space Mono'", "monospace"],
+                    },
+                    borderRadius: {
+                        'none': '0',
+                    },
+                    boxShadow: {
+                        'none': 'none',
+                    }
+                },
+            },
+        };
+    </script>
+    <style type="text/tailwindcss">
+        .brutal-block {
+            border: 1px solid #AAAAAA;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .brutal-heading {
+            color: #FFFFFF;
+            font-family: 'Space Mono', monospace;
+            text-transform: uppercase;
+            font-weight: 700;
+            font-size: 1.25rem;
+            line-height: 1.75rem;
+        }
+        .brutal-data {
+            color: #FFFFFF;
+            font-family: 'Space Mono', monospace;
+            text-transform: uppercase;
+            font-weight: 400;
+            font-size: 0.875rem;
+            line-height: 1.25rem;
+        }
+        .brutal-subtext {
+            color: #AAAAAA;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.75rem;
+            line-height: 1rem;
+        }
+        .brutal-status-active {
+            color: #FF6600;
+            font-family: 'Space Mono', monospace;
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+        .brutal-status-running {
+            color: #00FF66;
+        }
+        .brutal-status-stopped {
+            color: #FF3333;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .progress-brutal {
+            height: 8px;
+            background: #333333;
+            border: 1px solid #AAAAAA;
+        }
+        .progress-brutal-fill {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        .log-output {
+            background: #0a0a0a;
+            border: 1px solid #333;
+            font-family: 'Space Mono', monospace;
+            font-size: 11px;
+            line-height: 1.6;
+            color: #AAAAAA;
+            height: 300px;
+            overflow-y: auto;
+        }
+        .log-output .timestamp { color: #00FF66; }
+        .log-output .level-info { color: #FF6600; }
+        .log-output .level-warning { color: #FFCC00; }
+        .log-output .level-error { color: #FF3333; }
+        .tab-btn {
+            border: 1px solid #333;
+            padding: 8px 16px;
+            background: transparent;
+            color: #AAAAAA;
+            text-transform: uppercase;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .tab-btn:hover {
+            border-color: #AAAAAA;
+        }
+        .tab-btn.active {
+            border-color: #FF6600;
+            color: #FF6600;
+            background: rgba(255, 102, 0, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-bg-brutal-dark text-text-brutal-light font-mono min-h-screen py-8 px-4 sm:px-6 lg:px-8">
+    <div class="w-full max-w-7xl mx-auto">
+        <!-- Header -->
+        <div class="mb-8 flex flex-col md:flex-row justify-between items-start space-y-4 md:space-y-0">
+            <div class="flex items-start space-x-4">
+                <div class="p-3 border border-text-brutal-light">
+                    <span class="material-symbols-outlined text-accent-neon-orange text-2xl">monitoring</span>
+                </div>
+                <div>
+                    <h1 class="brutal-heading text-3xl mb-1 tracking-wider">MONITORING</h1>
+                    <p class="brutal-subtext">SOA1 SYSTEM DASHBOARD</p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div class="flex items-center space-x-2">
+                    <span id="refreshDot" class="relative flex h-2 w-2">
+                        <span class="absolute inline-flex h-full w-full bg-accent-neon-orange opacity-75 animate-ping"></span>
+                        <span class="relative inline-flex h-2 w-2 bg-accent-neon-orange"></span>
+                    </span>
+                    <span class="brutal-subtext text-xs">AUTO-REFRESH</span>
+                </div>
+                <a href="/" class="border border-text-brutal-gray px-4 py-2 brutal-data text-xs hover:border-text-brutal-light transition-colors">
+                    ← DASHBOARD
+                </a>
+            </div>
+        </div>
+
+        <!-- System Overview Row -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="p-4 border border-text-brutal-gray">
+                <div class="brutal-subtext text-xs mb-2">CPU USAGE</div>
+                <div class="brutal-heading text-2xl" id="cpuUsage">--</div>
+            </div>
+            <div class="p-4 border border-text-brutal-gray">
+                <div class="brutal-subtext text-xs mb-2">MEMORY</div>
+                <div class="brutal-heading text-2xl" id="memUsage">--</div>
+            </div>
+            <div class="p-4 border border-text-brutal-gray">
+                <div class="brutal-subtext text-xs mb-2">DISK</div>
+                <div class="brutal-heading text-2xl" id="diskUsage">--</div>
+            </div>
+            <div class="p-4 border border-text-brutal-gray">
+                <div class="brutal-subtext text-xs mb-2">UPTIME</div>
+                <div class="brutal-data text-sm" id="uptime">--</div>
+            </div>
+        </div>
+
+        <!-- Services + Ollama Row -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <!-- Services -->
+            <div class="p-6 border border-text-brutal-gray">
+                <div class="flex items-center space-x-3 mb-6">
+                    <span class="material-symbols-outlined text-accent-neon-orange">build</span>
+                    <h2 class="brutal-heading">SERVICES</h2>
+                </div>
+                <div id="servicesStatus" class="space-y-3">
+                    <div class="brutal-subtext">LOADING...</div>
+                </div>
+            </div>
+
+            <!-- Ollama -->
+            <div class="p-6 border border-text-brutal-gray">
+                <div class="flex items-center space-x-3 mb-6">
+                    <span class="material-symbols-outlined text-accent-neon-orange">psychology</span>
+                    <h2 class="brutal-heading">OLLAMA</h2>
+                </div>
+                <div id="ollamaStatus">
+                    <div class="brutal-subtext">LOADING...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GPU Status Row -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div class="p-6 border border-text-brutal-gray">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center space-x-3">
+                        <span class="material-symbols-outlined text-accent-neon-orange">memory</span>
+                        <h2 class="brutal-heading">GPU 0</h2>
+                    </div>
+                    <span id="gpu0Temp" class="brutal-data text-xs px-2 py-1 border border-text-brutal-gray">--°C</span>
+                </div>
+                <div id="gpu0Status">
+                    <div class="brutal-subtext">LOADING...</div>
+                </div>
+            </div>
+
+            <div class="p-6 border border-text-brutal-gray">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center space-x-3">
+                        <span class="material-symbols-outlined text-accent-neon-orange">memory</span>
+                        <h2 class="brutal-heading">GPU 1</h2>
+                    </div>
+                    <span id="gpu1Temp" class="brutal-data text-xs px-2 py-1 border border-text-brutal-gray">--°C</span>
+                </div>
+                <div id="gpu1Status">
+                    <div class="brutal-subtext">LOADING...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs Section -->
+        <div class="border border-text-brutal-gray mb-6">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center p-4 border-b border-text-brutal-gray space-y-4 md:space-y-0">
+                <div class="flex items-center space-x-3">
+                    <span class="material-symbols-outlined text-accent-neon-orange">terminal</span>
+                    <h2 class="brutal-heading">LOGS</h2>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button class="tab-btn active" data-log="webui">WEBUI</button>
+                    <button class="tab-btn" data-log="model_calls">MODEL CALLS</button>
+                    <button class="tab-btn" data-log="soa1_api">SOA1 API</button>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button id="logPauseBtn" onclick="toggleLogPause()" class="border border-text-brutal-gray px-3 py-1 brutal-subtext text-xs hover:border-accent-neon-orange transition-colors">
+                        ⏸ PAUSE
+                    </button>
+                    <button onclick="refreshLogs()" class="border border-text-brutal-gray px-3 py-1 brutal-subtext text-xs hover:border-accent-neon-orange transition-colors">
+                        ↻ REFRESH
+                    </button>
+                </div>
+            </div>
+            <div class="log-output p-4" id="logContent">
+                <div class="brutal-subtext">LOADING LOGS...</div>
+            </div>
+        </div>
+
+        <!-- Analysis Jobs -->
+        <div class="p-6 border border-text-brutal-gray mb-6">
+            <div class="flex items-center justify-between mb-6">
+                <div class="flex items-center space-x-3">
+                    <span class="material-symbols-outlined text-accent-neon-orange">analytics</span>
+                    <h2 class="brutal-heading">ANALYSIS HISTORY</h2>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div id="jobsSummary" class="brutal-subtext text-xs"></div>
+                    <button onclick="updateJobs()" class="border border-text-brutal-gray px-3 py-1 brutal-subtext text-xs hover:border-accent-neon-orange transition-colors">
+                        ↻ REFRESH
+                    </button>
+                </div>
+            </div>
+            <div id="jobsContent" class="overflow-x-auto">
+                <div class="flex items-center space-x-3 mb-3">
+                    <input id="jobSearch" placeholder="search doc id or status" class="px-3 py-2 border border-text-brutal-gray bg-transparent brutal-subtext text-xs" />
+                    <button onclick="updateJobs()" class="border border-text-brutal-gray px-3 py-1 brutal-subtext text-xs hover:border-accent-neon-orange transition-colors">↻ REFRESH</button>
+                    <button onclick="location.href='/api/reports'" class="border border-text-brutal-gray px-3 py-1 brutal-subtext text-xs hover:border-accent-neon-orange transition-colors">📁 REPORTS</button>
+                </div>
+                <div class="brutal-subtext">LOADING...</div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="flex flex-col md:flex-row justify-between items-center pt-6 border-t border-text-brutal-gray">
+            <button onclick="refreshAll()" class="flex items-center justify-center space-x-2 bg-accent-neon-orange hover:bg-orange-700 text-bg-brutal-dark px-6 py-3 border border-text-brutal-light transition-colors active:scale-95 brutal-data text-sm">
+                <span class="material-symbols-outlined text-lg">refresh</span>
+                <span class="font-bold">REFRESH ALL</span>
+            </button>
+            <p class="mt-4 md:mt-0 brutal-subtext text-center md:text-right">
+                LAST UPDATE: <span id="lastUpdate" class="brutal-data">{{ last_updated }}</span>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        let currentLogTab = 'webui';
+        let logPaused = false;
+        let statusInterval = null;
+        let logInterval = null;
+
+        async function fetchJSON(url) {
+            try {
+                const resp = await fetch(url);
+                return await resp.json();
+            } catch (e) {
+                console.error('Fetch error:', url, e);
+                return null;
+            }
+        }
+
+        async function updateSystemStatus() {
+            const data = await fetchJSON('/api/services');
+            if (!data) return;
+
+            document.getElementById('cpuUsage').textContent = data.system.cpu_usage.toFixed(1) + '%';
+            document.getElementById('memUsage').textContent = data.system.memory_usage.toFixed(1) + '%';
+            document.getElementById('diskUsage').textContent = data.system.disk_usage.toFixed(1) + '%';
+            document.getElementById('uptime').textContent = data.system.uptime || '--';
+
+            const servicesHtml = data.services.map(s => {
+                const statusClass = s.status === 'running' ? 'brutal-status-running' : 
+                                   s.status === 'stopped' ? 'brutal-status-stopped' : 'text-text-brutal-gray';
+                return `
+                    <div class="flex justify-between items-center py-2 border-b border-gray-800 last:border-0">
+                        <div>
+                            <div class="brutal-data text-sm">${s.display_name}</div>
+                            <div class="brutal-subtext">PORT ${s.port}</div>
+                        </div>
+                        <span class="${statusClass} text-xs font-bold px-2 py-1 border border-current">${s.status.toUpperCase()}</span>
+                    </div>
+                `;
+            }).join('');
+            document.getElementById('servicesStatus').innerHTML = servicesHtml || '<div class="brutal-subtext">NO SERVICES</div>';
+        }
+
+        async function updateOllamaStatus() {
+            const data = await fetchJSON('/api/ollama/status');
+            const container = document.getElementById('ollamaStatus');
+
+            if (!data || data.error) {
+                container.innerHTML = `<div class="brutal-status-stopped text-sm">${data?.error || 'NOT RESPONDING'}</div>`;
+                return;
+            }
+
+            let html = `
+                <div class="flex items-center space-x-2 mb-4">
+                    <span class="relative flex h-2 w-2">
+                        <span class="relative inline-flex h-2 w-2 ${data.running ? 'bg-accent-green' : 'bg-accent-red'}"></span>
+                    </span>
+                    <span class="${data.running ? 'brutal-status-running' : 'brutal-status-stopped'} text-xs">${data.running ? 'RUNNING' : 'STOPPED'}</span>
+                    ${data.version ? `<span class="brutal-subtext">v${data.version}</span>` : ''}
+                </div>
+            `;
+
+            if (data.loaded_models && data.loaded_models.length > 0) {
+                html += '<div class="brutal-subtext text-xs mb-3">LOADED MODELS:</div>';
+                data.loaded_models.forEach(m => {
+                    const sizeMB = m.size ? (m.size / 1024 / 1024 / 1024).toFixed(1) + ' GB' : '--';
+                    const vramMB = m.size_vram ? (m.size_vram / 1024 / 1024 / 1024).toFixed(1) + ' GB VRAM' : '';
+                    html += `
+                        <div class="p-3 border border-gray-800 mb-2">
+                            <div class="brutal-data text-sm">${m.name}</div>
+                            <div class="brutal-subtext mt-1">${sizeMB} ${vramMB ? '| ' + vramMB : ''}</div>
+                        </div>
+                    `;
+                });
+            } else {
+                html += '<div class="brutal-subtext">NO MODELS LOADED</div>';
+            }
+
+            html += `<div class="brutal-subtext mt-3">${data.models?.length || 0} MODELS AVAILABLE</div>`;
+            container.innerHTML = html;
+        }
+
+        async function updateGPUStatus() {
+            const data = await fetchJSON('/api/gpu/status');
+
+            for (let i = 0; i < 2; i++) {
+                const container = document.getElementById(`gpu${i}Status`);
+                const tempEl = document.getElementById(`gpu${i}Temp`);
+
+                if (!data || !data.available) {
+                    container.innerHTML = `<div class="brutal-status-stopped text-sm">${data?.error || 'GPU NOT AVAILABLE'}</div>`;
+                    tempEl.textContent = '--°C';
+                    continue;
+                }
+
+                const gpu = data.gpus.find(g => g.index === i);
+                if (!gpu) {
+                    container.innerHTML = '<div class="brutal-subtext">GPU NOT FOUND</div>';
+                    tempEl.textContent = '--°C';
+                    continue;
+                }
+
+                const memPct = (gpu.memory_used_mb / gpu.memory_total_mb * 100).toFixed(0);
+                tempEl.textContent = `${gpu.temperature_c}°C`;
+                tempEl.className = `brutal-data text-xs px-2 py-1 border ${gpu.temperature_c > 80 ? 'border-accent-red text-accent-red' : 'border-text-brutal-gray'}`;
+
+                container.innerHTML = `
+                    <div class="brutal-subtext text-xs mb-1">${gpu.name}</div>
+                    
+                    <div class="mt-4">
+                        <div class="flex justify-between brutal-subtext text-xs mb-1">
+                            <span>MEMORY</span>
+                            <span>${gpu.memory_used_mb} / ${gpu.memory_total_mb} MB (${memPct}%)</span>
+                        </div>
+                        <div class="progress-brutal">
+                            <div class="progress-brutal-fill bg-accent-neon-orange" style="width: ${memPct}%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <div class="flex justify-between brutal-subtext text-xs mb-1">
+                            <span>UTILIZATION</span>
+                            <span>${gpu.utilization_pct}%</span>
+                        </div>
+                        <div class="progress-brutal">
+                            <div class="progress-brutal-fill bg-accent-green" style="width: ${gpu.utilization_pct}%"></div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        async function updateLogs() {
+            if (logPaused) return;
+
+            const data = await fetchJSON(`/api/logs/tail/${currentLogTab}?lines=100`);
+            const container = document.getElementById('logContent');
+
+            if (!data || data.error) {
+                container.innerHTML = `<div class="brutal-status-stopped">${data?.error || 'FAILED TO LOAD LOGS'}</div>`;
+                return;
+            }
+
+            if (!data.lines || data.lines.length === 0) {
+                container.innerHTML = '<div class="brutal-subtext">NO LOG ENTRIES</div>';
+                return;
+            }
+
+            const html = data.lines.map(line => {
+                let coloredLine = line
+                    .replace(/(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})/g, '<span class="timestamp">$1</span>')
+                    .replace(/\b(INFO)\b/gi, '<span class="level-info">$1</span>')
+                    .replace(/\b(WARNING|WARN)\b/gi, '<span class="level-warning">$1</span>')
+                    .replace(/\b(ERROR|CRITICAL)\b/gi, '<span class="level-error">$1</span>');
+                return `<div class="py-0.5 hover:bg-gray-900">${coloredLine}</div>`;
+            }).join('');
+
+            const wasAtBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 50;
+            container.innerHTML = html;
+            if (wasAtBottom) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        async function updateJobs() {
+            const data = await fetchJSON('/api/analysis/jobs');
+            const container = document.getElementById('jobsContent');
+            const summaryEl = document.getElementById('jobsSummary');
+
+            if (!data || !data.jobs || data.jobs.length === 0) {
+                container.innerHTML = '<div class="brutal-subtext">NO ANALYSIS JOBS</div>';
+                summaryEl.textContent = '';
+                return;
+            }
+
+            const completed = data.jobs.filter(j => j.status === 'completed');
+            const totalTxns = completed.reduce((sum, j) => sum + (j.transaction_count || 0), 0);
+            const avgDuration = completed.length > 0 
+                ? (completed.reduce((sum, j) => sum + (j.duration_s || 0), 0) / completed.length).toFixed(1)
+                : 0;
+            
+            summaryEl.innerHTML = `
+                <span class="text-accent-green">${completed.length}</span> COMPLETED |
+                <span class="text-accent-neon-orange">${totalTxns}</span> TXNS |
+                AVG <span class="text-text-brutal-light">${avgDuration}s</span>
+            `;
+
+            const search = document.getElementById('jobSearch')?.value?.toLowerCase() || '';
+            const filtered = data.jobs.filter(j => {
+                if (!search) return true;
+                return (j.doc_id || '').toLowerCase().includes(search) || (j.status || '').toLowerCase().includes(search);
+            });
+            const rows = filtered.slice(0, 200).map((j, idx) => {
+                const statusClass = j.status === 'completed' ? 'brutal-status-running' : 
+                                   j.status === 'failed' ? 'brutal-status-stopped' : 'text-accent-neon-orange';
+                
+                const duration = j.duration_s ? `${j.duration_s}s` : '--';
+                const startTime = j.started_at ? new Date(j.started_at).toLocaleTimeString() : '--';
+                const docIdShort = j.doc_id.length > 25 ? j.doc_id.slice(0, 25) + '...' : j.doc_id;
+                
+                let stepTimingHtml = '';
+                if (j.step_timings) {
+                    const steps = Object.entries(j.step_timings)
+                        .map(([k, v]) => `<span class="text-text-brutal-gray">${k.replace('_', ' ')}:</span> ${(v/1000).toFixed(1)}s`)
+                        .join(' | ');
+                    stepTimingHtml = `<div class="brutal-subtext text-xs mt-1 opacity-70">${steps}</div>`;
+                }
+                
+                let anomalyHtml = '';
+                if (j.anomaly_count && j.anomaly_count > 0) {
+                    anomalyHtml = `<span class="text-accent-red ml-2" title="${j.anomalies?.map(a => a.description).join('; ') || ''}">⚠ ${j.anomaly_count}</span>`;
+                }
+
+                return `
+                    <tr class="border-b border-gray-800 hover:bg-gray-900 cursor-pointer" onclick="toggleJobDetail('job-${idx}')">
+                        <td class="py-3 pr-4">
+                            <div class="brutal-data text-xs">${docIdShort} ${j.seeded ? '<span class="px-2 py-1 border border-text-brutal-gray text-xs ml-2'>REPORT</span>' : ''}</div>
+                            <div class="brutal-subtext text-xs">${startTime}</div>
+                        </td>
+                        <td class="py-3 pr-4">
+                            <span class="${statusClass} text-xs">${j.status.toUpperCase()}</span>
+                            ${anomalyHtml}
+                        </td>
+                        <td class="py-3 pr-4 brutal-data text-sm text-center">${j.transaction_count ?? '--'}</td>
+                        <td class="py-3 pr-4 brutal-data text-sm text-right">${duration}</td>
+                        <td class="py-3 brutal-subtext text-xs">
+                            ${j.step_timings ? `
+                                <span class="text-text-brutal-gray">ext:</span>${(j.step_timings.transaction_extraction/1000 || 0).toFixed(1)}s
+                                <span class="text-text-brutal-gray ml-2">anom:</span>${(j.step_timings.anomaly_check/1000 || 0).toFixed(1)}s
+                            ` : '--'}
+                        </td>
+                    </tr>
+                    <tr id="job-${idx}" class="hidden bg-gray-900">
+                        <td colspan="5" class="p-4">
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div>
+                                    <div class="brutal-subtext text-xs mb-1">FULL DOC ID</div>
+                                    <div class="brutal-data text-xs break-all">${j.doc_id}</div>
+                                </div>
+                                <div>
+                                    <div class="brutal-subtext text-xs mb-1">PIPELINE TIME</div>
+                                    <div class="brutal-data text-xs">${j.pipeline_ms ? (j.pipeline_ms/1000).toFixed(2) + 's' : '--'}</div>
+                                </div>
+                                <div>
+                                    <div class="brutal-subtext text-xs mb-1">COMPLETED AT</div>
+                                    <div class="brutal-data text-xs">${j.completed_at ? new Date(j.completed_at).toLocaleString() : '--'}</div>
+                                </div>
+                                <div>
+                                    <div class="brutal-subtext text-xs mb-1">ERROR</div>
+                                    <div class="brutal-data text-xs ${j.error ? 'text-accent-red' : ''}">${j.error || 'NONE'}</div>
+                                </div>
+                            </div>
+                            ${j.step_timings ? `
+                                <div class="mt-4">
+                                    <div class="brutal-subtext text-xs mb-2">STEP BREAKDOWN</div>
+                                    <div class="flex flex-wrap gap-2">
+                                        ${Object.entries(j.step_timings).map(([step, ms]) => `
+                                            <div class="px-3 py-2 border border-gray-700">
+                                                <div class="brutal-subtext text-xs">${step.replace(/_/g, ' ').toUpperCase()}</div>
+                                                <div class="brutal-data text-sm">${(ms/1000).toFixed(2)}s</div>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+                            ${j.anomalies && j.anomalies.length > 0 ? `
+                                <div class="mt-4">
+                                    <div class="brutal-subtext text-xs mb-2 text-accent-red">ANOMALIES DETECTED</div>
+                                    ${j.anomalies.map(a => `
+                                        <div class="p-2 border border-accent-red mb-2">
+                                            <div class="brutal-data text-xs text-accent-red">${a.type.toUpperCase()}</div>
+                                            <div class="brutal-subtext text-xs mt-1">${a.description}</div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
+                            <div class="mt-3">
+                                <a href="/reports/${j.doc_id}/dashboard/analysis.json" target="_blank" class="border border-text-brutal-gray px-3 py-1 brutal-subtext text-xs hover:border-text-brutal-light">View Report</a>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            container.innerHTML = `
+                <table class="w-full">
+                    <thead>
+                        <tr class="border-b border-text-brutal-gray">
+                            <th class="text-left py-2 brutal-subtext text-xs">DOC ID / TIME</th>
+                            <th class="text-left py-2 brutal-subtext text-xs">STATUS</th>
+                            <th class="text-center py-2 brutal-subtext text-xs">TXNS</th>
+                            <th class="text-right py-2 brutal-subtext text-xs">DURATION</th>
+                            <th class="text-left py-2 brutal-subtext text-xs">PIPELINE STEPS</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                ${data.jobs.length > 20 ? `<div class="brutal-subtext text-center mt-4">SHOWING 20 OF ${data.jobs.length} JOBS</div>` : ''}
+            `;
+        }
+
+        function toggleJobDetail(rowId) {
+            const row = document.getElementById(rowId);
+            if (row) {
+                row.classList.toggle('hidden');
+            }
+        }
+
+        function toggleLogPause() {
+            logPaused = !logPaused;
+            const btn = document.getElementById('logPauseBtn');
+            btn.textContent = logPaused ? '▶ RESUME' : '⏸ PAUSE';
+            btn.classList.toggle('border-accent-neon-orange', logPaused);
+            btn.classList.toggle('text-accent-neon-orange', logPaused);
+        }
+
+        function refreshLogs() {
+            updateLogs();
+        }
+
+        function updateTimestamp() {
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleString();
+        }
+
+        document.querySelectorAll('.tab-btn').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentLogTab = tab.dataset.log;
+                document.getElementById('logContent').innerHTML = '<div class="brutal-subtext">LOADING...</div>';
+                updateLogs();
+            });
+        });
+
+        async function refreshAll() {
+            await Promise.all([
+                updateSystemStatus(),
+                updateOllamaStatus(),
+                updateGPUStatus(),
+                updateJobs()
+            ]);
+            updateTimestamp();
+        }
+
+        refreshAll();
+        updateLogs();
+
+        statusInterval = setInterval(refreshAll, 5000);
+        logInterval = setInterval(updateLogs, 3000);
+    </script>
+</body>
+</html>

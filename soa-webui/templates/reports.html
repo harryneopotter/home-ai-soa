@@ -1,0 +1,24 @@
+<html>
+<head>
+  <title>Reports</title>
+  <style>
+    body { background: #000; color: #fff; font-family: monospace; }
+    .report { border: 1px solid #333; padding: 8px; margin-bottom: 8px }
+  </style>
+</head>
+<body>
+  <h1>Available Reports</h1>
+  {% if reports %}
+    <ul>
+      {% for r in reports %}
+        <li class="report">
+          <div><b>{{ r.doc_id }}</b> — {{ r.transaction_count or '–' }} txns — ${{ r.total_spent or '–' }}</div>
+          <div><a href="/reports/{{ r.doc_id }}/dashboard/analysis.json" target="_blank">View Analysis JSON</a> | <a href="/reports/{{ r.doc_id }}/dashboard/transactions.json" target="_blank">View Transactions JSON</a></div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div>No reports found</div>
+  {% endif %}
+</body>
+</html>
