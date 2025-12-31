@@ -387,15 +387,21 @@ def load_job(job_id: str) -> Optional[Dict[str, Any]]:
 
 
 def save_analysis_job(job: Dict[str, Any]) -> None:
-    """Upsert an analysis job record from a dict."""
+    """Upsert an analysis job record from a dict.
+
+    Checks by doc_id first (since that's the UNIQUE constraint), then by job_id.
+    This handles the case where different services create jobs with different job_ids
+    for the same document.
+    """
     job_id = job.get("job_id")
     doc_id = job.get("doc_id")
     if not job_id or not doc_id:
         return
 
     with get_db() as conn:
+        # Check by doc_id first (UNIQUE constraint)
         existing = conn.execute(
-            "SELECT job_id FROM analysis_jobs WHERE job_id = ?", (job_id,)
+            "SELECT job_id FROM analysis_jobs WHERE doc_id = ?", (doc_id,)
         ).fetchone()
 
         if existing:
@@ -409,6 +415,7 @@ def save_analysis_job(job: Dict[str, Any]) -> None:
                 "consent_given",
                 "confirmed_specialist",
                 "confirmed_intent",
+                "job_id",
             }
             updates = []
             params = []
@@ -417,9 +424,9 @@ def save_analysis_job(job: Dict[str, Any]) -> None:
                     updates.append(f"{k}=?")
                     params.append(v)
             if updates:
-                params.append(job_id)
+                params.append(doc_id)
                 conn.execute(
-                    f"UPDATE analysis_jobs SET {', '.join(updates)} WHERE job_id=?",
+                    f"UPDATE analysis_jobs SET {', '.join(updates)} WHERE doc_id=?",
                     params,
                 )
         else:

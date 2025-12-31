@@ -304,6 +304,128 @@ async def get_analysis_jobs():
     return {"jobs": jobs, "total": len(jobs)}
 
 
+@router.get("/api/reports/consolidated")
+async def api_consolidated_reports():
+    """Generate a consolidated report across all analyzed documents."""
+    if not FINANCE_REPORTS_DIR.exists() or not FINANCE_REPORTS_DIR.is_dir():
+        return {"error": "No reports directory found", "reports": []}
+
+    all_transactions: List[Dict[str, Any]] = []
+    all_analyses: List[Dict[str, Any]] = []
+    total_spent = 0.0
+    by_category: Dict[str, float] = {}
+    by_month: Dict[str, float] = {}
+    merchant_totals: Dict[str, float] = {}
+    doc_summaries: List[Dict[str, Any]] = []
+
+    for d in sorted(FINANCE_REPORTS_DIR.iterdir(), key=lambda x: x.stat().st_mtime):
+        if not d.is_dir():
+            continue
+
+        doc_id = d.name
+        analysis = _load_json_if_exists(d / "analysis.json") or {}
+        tx_data = _load_json_if_exists(d / "transactions.json")
+
+        transactions = []
+        if isinstance(tx_data, list):
+            transactions = tx_data
+        elif isinstance(tx_data, dict):
+            transactions = tx_data.get("transactions", [])
+            if not transactions and isinstance(tx_data, dict):
+                transactions = [tx_data] if "date" in tx_data else []
+
+        doc_total = analysis.get("total_spent", 0) or 0
+        doc_tx_count = analysis.get("transaction_count", len(transactions))
+
+        doc_summaries.append(
+            {
+                "doc_id": doc_id,
+                "total_spent": doc_total,
+                "transaction_count": doc_tx_count,
+                "date_range": analysis.get("date_range", {}),
+            }
+        )
+
+        total_spent += doc_total
+
+        for cat, amt in (analysis.get("by_category") or {}).items():
+            by_category[cat] = by_category.get(cat, 0) + (amt or 0)
+
+        for tx in transactions:
+            tx_copy = dict(tx)
+            tx_copy["source_doc"] = doc_id
+            all_transactions.append(tx_copy)
+
+            date_str = tx.get("date", "")
+            if date_str and "/" in date_str:
+                parts = date_str.split("/")
+                if len(parts) >= 2:
+                    month_key = f"{parts[0]}/{parts[2] if len(parts) > 2 else '2025'}"
+                    amt = float(tx.get("amount", 0) or 0)
+                    by_month[month_key] = by_month.get(month_key, 0) + amt
+
+            merchant = tx.get("merchant", "Unknown")
+            amt = float(tx.get("amount", 0) or 0)
+            merchant_totals[merchant] = merchant_totals.get(merchant, 0) + amt
+
+        if analysis:
+            all_analyses.append(analysis)
+
+    top_merchants = sorted(
+        [{"name": k, "total": round(v, 2)} for k, v in merchant_totals.items()],
+        key=lambda x: x["total"],
+        reverse=True,
+    )[:15]
+
+    sorted_categories = dict(
+        sorted(by_category.items(), key=lambda x: x[1], reverse=True)
+    )
+
+    month_order = [
+        "01",
+        "02",
+        "03",
+        "04",
+        "05",
+        "06",
+        "07",
+        "08",
+        "09",
+        "10",
+        "11",
+        "12",
+    ]
+    sorted_months = {}
+    for m in month_order:
+        for k, v in by_month.items():
+            if k.startswith(m + "/"):
+                sorted_months[k] = round(v, 2)
+
+    all_insights = []
+    all_recommendations = []
+    for a in all_analyses:
+        all_insights.extend(a.get("insights", []))
+        all_recommendations.extend(a.get("recommendations", []))
+
+    return {
+        "consolidated": True,
+        "generated_at": datetime.now().isoformat(),
+        "summary": {
+            "total_documents": len(doc_summaries),
+            "total_transactions": len(all_transactions),
+            "total_spent": round(total_spent, 2),
+            "currency": "USD",
+        },
+        "by_category": {k: round(v, 2) for k, v in sorted_categories.items()},
+        "by_month": sorted_months,
+        "top_merchants": top_merchants,
+        "document_summaries": doc_summaries,
+        "insights": list(set(all_insights))[:10],
+        "recommendations": list(set(all_recommendations))[:10],
+        "transactions": all_transactions,
+    }
+
+
 @router.get("/analysis-timing/{doc_id}")
 async def analysis_timing(doc_id: str):
     # If seeded job exists, return its timing/anomalies

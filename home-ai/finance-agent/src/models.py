@@ -84,8 +84,8 @@ async def call_nemotron(prompt: str) -> str:
         "options": {
             "temperature": endpoint.temperature,
             "num_predict": endpoint.max_tokens,
-            "num_gpu": 1,
-            "num_thread": 1,
+            "num_gpu": 99,
+            "num_ctx": 32768,
         },
         "stream": False,
         "keep_alive": -1,
@@ -102,6 +102,8 @@ async def call_nemotron(prompt: str) -> str:
                 raise RuntimeError(f"Nemotron error {response.status}: {text}")
             data = await response.json()
             try:
+                if "message" in data and "content" in data["message"]:
+                    return data["message"]["content"].strip()
                 return data["choices"][0]["message"]["content"].strip()
             except (KeyError, IndexError) as exc:
                 raise RuntimeError(f"Unexpected Nemotron response: {data}") from exc
@@ -129,7 +131,7 @@ async def call_phinance(payload_json: str) -> str:
             "temperature": endpoint.temperature,
             "num_predict": endpoint.max_tokens,
             "num_gpu": 99,
-            "num_thread": 1,
+            "num_ctx": 4096,
         },
         "stream": False,
         "keep_alive": -1,
@@ -169,7 +171,10 @@ async def call_phinance(payload_json: str) -> str:
                 raise RuntimeError(f"Phinance error {response.status}: {text}")
             data = await response.json()
             try:
-                result = data["choices"][0]["message"]["content"].strip()
+                if "message" in data and "content" in data["message"]:
+                    result = data["message"]["content"].strip()
+                else:
+                    result = data["choices"][0]["message"]["content"].strip()
                 log_model_call(
                     model_name="phinance",
                     resolved_model=endpoint.model_name,
@@ -219,7 +224,7 @@ Top Merchants:
         "format": "json",
         "options": {
             "num_gpu": 99,
-            "num_thread": 1,
+            "num_ctx": 4096,
         },
         "stream": False,
         "keep_alive": -1,

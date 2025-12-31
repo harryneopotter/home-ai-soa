@@ -126,6 +126,14 @@ agent_*.log
 memlayer_repo/
 llamafarm/
 dmidecode.txt
+.ruff_cache/
+llamafarm_clean/
+src/
+home-ai/memori/
+home-ai/llamafarm/
+home-ai/*pyc*/
+
+
 qsd
 qsd.pub
    
@@ -137,3 +145,4 @@ FILE_CHECKLISTS.md
 FINANCE_MVP_PLAN_V2.md
 IMPLEMENTATION_GUIDE.md
 *init*.*
+test_logs/

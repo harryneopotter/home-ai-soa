@@ -2,6 +2,74 @@
 
 ## 📅 Session History
 
+### December 28, 2025 - Gemini CLI Context Setup & Documentation (Session 7)
+
+#### 📝 Documentation Rewrite
+- **GEMINI.md**: Completely rewrote `GEMINI.md` to reflect the current project structure (`home-ai`, `soa-webui`, `RemAssist`), service mappings (ports 8000, 8001, 8080, etc.), and mandatory context tracking requirements.
+- **Rules**: Re-integrated strict execution rules and added mandatory updates for `History.md`, `NEXT_TASKS.md`, and `errors.md` after every task.
+
+#### 🛠️ Actions Taken
+- Analyzed codebase structure using file system tools.
+- Verified service configurations in `config.yaml` files across the monorepo.
+- Updated `GEMINI.md` with detailed project context to improve agent grounding and established `NEXT_TASKS.md` as the primary task queue.
+
+### December 28, 2025 - WebUI Overhaul & Demo Prep (Session 8)
+
+#### 🎨 UI/UX Redesign
+- **Redesigned Main WebUI**: Replaced the generic admin-style `index.html` with a **Brutalist Dark Theme** chat interface, matching the `monitoring.html` aesthetic.
+- **Integrated Chat & Upload**: Added a unified interface for file uploads and chatting directly on the dashboard.
+- **Added Proxy Endpoint**: Implemented `/api/proxy/upload` in `soa-webui/main.py` to securely forward file uploads to the backend API (`soa1/api.py`), resolving CORS/port isolation issues.
+
+#### 🔧 Functional Verification
+- Verified `soa-webui/main.py` routing and proxy logic.
+- Ensured `index.html` serves as the primary entry point with full functionality.
+- Confirmed "Local Appliance" context in `Critical-review.md`.
+
+### December 28, 2025 - WebUI Finance Pipeline Fixes (Session 6)
+
+#### 🐛 Issues Fixed
+
+**1. UNIQUE Constraint Violation in save_analysis_job**
+- **Error:** `UNIQUE constraint failed: analysis_jobs.doc_id`
+- **Root Cause:** SOA1 API and WebUI created jobs with different `job_id`s for the same `doc_id`. The `save_analysis_job()` function checked for existing records by `job_id` instead of `doc_id` (the actual UNIQUE constraint), causing INSERT failures.
+- **Fix:** Modified `save_analysis_job()` in `home-ai/finance-agent/src/storage.py` to check by `doc_id` first, and UPDATE using `WHERE doc_id=?`.
+
+**2. Wrong Parser Import - parse_apple_card_statement Not Found**
+- **Error:** `cannot import name 'parse_apple_card_statement' from 'home_ai.finance_agent.src.parser'`
+- **Root Cause:** WebUI's `_run_phinance_analysis()` assumed a simple function `parse_apple_card_statement(path)` but the actual parser is class-based (`FinanceStatementParser`) with async methods requiring a specific call chain.
+- **Fix:** Rewrote `_run_phinance_analysis()` in `soa-webui/main.py` to use `FinanceStatementParser` class with `asyncio.run()` wrapper for the async method chain: `get_identity_context()` → `get_structural_summary()` → `extract_transactions()`.
+
+**3. Ollama Response Format Mismatch**
+- **Error:** `RuntimeError: Unexpected Nemotron response: {'model': 'NemoAgent', 'message': {'content': '...'}, ...}`
+- **Root Cause:** `call_nemotron()` and `call_phinance()` in `models.py` tried to parse OpenAI format (`data["choices"][0]["message"]["content"]`) but Ollama's `/api/chat` returns `data["message"]["content"]`.
+- **Fix:** Updated both functions in `home-ai/finance-agent/src/models.py` to check for Ollama format first, with fallback to OpenAI format.
+
+#### 📝 Files Modified
+- `home-ai/finance-agent/src/storage.py` - Fixed `save_analysis_job()` to check by `doc_id`
+- `home-ai/finance-agent/src/models.py` - Fixed response parsing for Ollama format
+- `soa-webui/main.py` - Rewrote `_run_phinance_analysis()` to use `FinanceStatementParser` class
+- `RemAssist/errors.md` - Documented all 3 errors with root causes and fixes
+
+#### ✅ Verified
+- Userflow test (`test_scripts/userflow_test.py`) passes end-to-end
+- Full pipeline works: Upload → Stage A/B → Consent → Analyze → Reports
+- 83 transactions extracted from Apple Card statement
+- Phinance insights generated with category breakdown ($8,321.71 total)
+- Reports created at `home-ai/finance-agent/data/reports/{doc_id}/`
+- Chat follow-up works after analysis completion
+
+#### 📊 Test Results
+```
+doc_id: finance-20251228-001842-5417ca
+transactions: 83
+total_spent: $8,321.71
+top_category: travel ($3,109.79)
+phinance_insights: ✅ Generated
+reports: transactions.json (21KB), analysis.json (2KB)
+```
+
+---
+
 ### December 27, 2025 - Progressive Engagement Implementation (Session 5)
 
 #### 🛠️ Implementation

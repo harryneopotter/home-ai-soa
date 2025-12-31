@@ -148,6 +148,77 @@ phinance | opts={'num_gpu': 1, 'num_thread': 1}  # Should be 99!
 
 ---
 
+### 2025-12-28: UNIQUE Constraint Violation in save_analysis_job
+
+**Error:**
+```
+ERROR:soa-webui:Failed to save job to DB: UNIQUE constraint failed: analysis_jobs.doc_id
+```
+
+**Context:** WebUI finance endpoints were failing to save job records after code changes.
+
+**Root Cause:**
+- SOA1 API creates jobs with `job_id=A` during `/upload-pdf`
+- WebUI's `analyze-confirm` created jobs with `job_id=B` (different)
+- `save_analysis_job()` checked for existing record by `job_id`, not `doc_id`
+- Since job_ids didn't match, it tried INSERT which violated UNIQUE constraint on `doc_id`
+
+**Fix Applied:**
+- Modified `save_analysis_job()` in `home-ai/finance-agent/src/storage.py`
+- Changed to check by `doc_id` first (the actual UNIQUE constraint)
+- UPDATE now uses `WHERE doc_id=?` instead of `WHERE job_id=?`
+- Added `job_id` to allowed update fields
+
+**Status:** ✅ RESOLVED
+
+---
+
+### 2025-12-28: Wrong Import - parse_apple_card_statement Not Found
+
+**Error:**
+```
+cannot import name 'parse_apple_card_statement' from 'home_ai.finance_agent.src.parser'
+```
+
+**Context:** WebUI's `_run_phinance_analysis()` was importing a non-existent function.
+
+**Root Cause:**
+- Code assumed a simple function `parse_apple_card_statement(path)`
+- Actual parser is class-based: `FinanceStatementParser` with async methods
+- The class requires: `get_identity_context()` → `get_structural_summary()` → `extract_transactions()`
+
+**Fix Applied:**
+- Rewrote `_run_phinance_analysis()` in `soa-webui/main.py`
+- Now imports `FinanceStatementParser` class
+- Uses `asyncio.run()` wrapper for async methods in the thread
+- Properly chains: identity → summary → extraction
+
+**Status:** ✅ RESOLVED
+
+---
+
+### 2025-12-28: Ollama Response Format Mismatch
+
+**Error:**
+```
+RuntimeError: Unexpected Nemotron response: {'model': 'NemoAgent', 'message': {'role': 'assistant', 'content': '...'}, ...}
+```
+
+**Context:** Parser's Nemotron calls were failing despite successful Ollama responses.
+
+**Root Cause:**
+- `call_nemotron()` and `call_phinance()` tried to parse OpenAI format: `data["choices"][0]["message"]["content"]`
+- Ollama's `/api/chat` returns different format: `data["message"]["content"]`
+
+**Fix Applied:**
+- Updated `call_nemotron()` in `home-ai/finance-agent/src/models.py`
+- Updated `call_phinance()` similarly
+- Now checks for Ollama format first, falls back to OpenAI format
+
+**Status:** ✅ RESOLVED
+
+---
+
 ## Template for New Entries
 
 ```markdown

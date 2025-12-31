@@ -100,14 +100,16 @@ def call_phinance(payload_json: str) -> str:
 
 
 def _build_chat_payload(endpoint: ModelEndpoint, user_content: str) -> Dict:
-    # Use Ollama native API shape to support keep_alive semantics when possible
     return {
         "model": endpoint.model_name,
         "messages": [{"role": "user", "content": user_content}],
-        "temperature": endpoint.temperature,
-        "num_predict": endpoint.max_tokens,
+        "options": {
+            "temperature": endpoint.temperature,
+            "num_predict": endpoint.max_tokens,
+            "num_gpu": 99,
+            "num_ctx": 32768,
+        },
         "stream": False,
-        # Keep alive negative -> infinite / pinned
         "keep_alive": -1,
     }
 
@@ -117,6 +119,8 @@ def _dispatch_request(endpoint: ModelEndpoint, payload: Dict) -> str:
     response.raise_for_status()
     data = response.json()
     try:
+        if "message" in data and "content" in data["message"]:
+            return data["message"]["content"].strip()
         return data["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError) as exc:
         raise RuntimeError(f"Unexpected response from {endpoint.name}: {data}") from exc

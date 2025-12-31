@@ -9,6 +9,7 @@ _Last updated: December 27, 2025 (Session 4)_
 - ✅ Working: SOA1 API, WebUI, Ollama, MemLayer, finance pipeline, E2E tests passing
 - ✅ GPU Status: NemoAgent (9.4GB, GPU 0, 100%), phinance-json (4GB, GPU 1, 100%)
 - ✅ Performance: Analysis pipeline ~9.4s total (transaction_extraction ~1.6s, anomaly_check ~7.8s)
+- ✅ **Gemini CLI Context**: `GEMINI.md` rewritten with full project context and mandatory tracking rules.
 - ✅ Consent endpoint registered at `/api/consent`
 - ✅ Phinance model calls now logged to `logs/model_calls.jsonl`
 - ✅ Smoke test (userflow_test.py) passing with consent flow
@@ -25,6 +26,12 @@ _Last updated: December 27, 2025 (Session 4)_
 ---
 
 ## 🚀 Immediate Priority Tasks
+
+### 0. Documentation & Agent Context ✅ COMPLETED (Dec 28, 2025)
+- [x] Analyze monorepo structure and ignore patterns
+- [x] Consolidate service ports and technology stack documentation
+- [x] Rewrite `GEMINI.md` for Gemini CLI grounding
+- [x] Establish mandatory `History.md`, `NEXT_TASKS.md`, and `errors.md` update flow
 
 ### 0. Smoke Test & Integration Validation ✅ COMPLETED
 - [x] Run single-upload smoke test: upload PDF → POST /api/consent → POST /analyze-confirm → poll /analysis-status → verify DB records & files
@@ -90,10 +97,13 @@ _Last updated: December 27, 2025 (Session 4)_
 - [ ] Add conversation memory to MemLayer for cross-session context
 - [ ] Improve finance context injection in `/api/chat` (currently keyword-based)
 
-### 5. UI Enhancements
+### 5. UI Enhancements ✅ COMPLETED (Dec 28, 2025)
+- [x] Redesign `index.html` to match Brutalist Dark Theme (`monitoring.html`)
+- [x] Integrate Chat & File Upload into main dashboard
+- [x] Add `/api/proxy/upload` to WebUI backend to support file uploads
+- [x] Mobile responsive improvements (Tailwind grid layout)
 - [ ] Add analysis results display in chat (cards, charts)
 - [ ] Add spending dashboard page using dashboard JSON output
-- [ ] Mobile responsive improvements
 
 ### 6. Multi-Document Analysis
 - [ ] Support batch PDF uploads

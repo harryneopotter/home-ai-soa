@@ -4,7 +4,7 @@ SOA1 Web UI - Tailscale Edition
 Main web application for monitoring and controlling SOA1 services
 """
 
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, HTTPException, Depends, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBearer
@@ -95,7 +95,8 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 if not STATIC_DIR.exists():
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-templates = Jinja2Templates(directory="templates")
+TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # Load reports router from file location (robust to import style/package layout)
 try:
@@ -259,40 +260,24 @@ def get_service_status() -> List[ServiceStatus]:
 
 
 def get_system_status() -> SystemStatus:
-    # ensure FINANCE_REPORTS_DIR is configured
     global FINANCE_REPORTS_DIR
     if "FINANCE_REPORTS_DIR" not in globals():
         from pathlib import Path
 
         FINANCE_REPORTS_DIR = Path("home-ai/finance-agent/data/reports")
-    return (
-        get_system_status.__wrapped__()
-        if hasattr(get_system_status, "__wrapped__")
-        else get_system_status()
-    )
-    """Get overall system status"""
+
     status = SystemStatus()
 
     try:
-        # CPU usage
-        status.cpu_usage = psutil.cpu_percent(interval=1)
-
-        # Memory usage
+        status.cpu_usage = psutil.cpu_percent(interval=0.1)
         memory = psutil.virtual_memory()
         status.memory_usage = memory.percent
-
-        # Disk usage
         disk = psutil.disk_usage("/")
         status.disk_usage = disk.percent
-
-        # Uptime
         boot_time = datetime.fromtimestamp(psutil.boot_time())
         uptime = datetime.now() - boot_time
         status.uptime = str(uptime).split(".")[0]
-
-        # Tailscale IP
         status.tailscale_ip = get_tailscale_ip()
-
     except Exception as e:
         logger.error(f"Error getting system status: {e}")
 
@@ -309,7 +294,7 @@ def check_access(client_ip: str):
 
 @app.get("/")
 def home(request: Request):
-    """Main dashboard"""
+    """User Chat & Upload Interface"""
     client_ip = request.client.host
 
     if not check_access(client_ip):
@@ -318,27 +303,47 @@ def home(request: Request):
     services = get_service_status()
     system_status = get_system_status()
 
-    # Calculate overall status
-    required_services = [s for s in services if s.required]
-    running_required = [s for s in required_services if s.status == "running"]
-    overall_status = (
-        "operational" if len(running_required) == len(required_services) else "degraded"
-    )
-
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
-            "title": "SOA1 Web UI - Tailscale Edition",
+            "title": "SOA1 Assistant",
             "services": services,
             "system_status": system_status,
-            "overall_status": overall_status,
-            "required_count": len(required_services),
-            "running_required": len(running_required),
-            "tailscale_enabled": config.tailscale.get("enabled", True),
             "tailscale_ip": system_status.tailscale_ip,
             "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         },
+    )
+
+
+@app.get("/dashboard/{doc_id}")
+def analysis_dashboard(request: Request, doc_id: str):
+    """Detailed Analysis Dashboard for a specific document"""
+    client_ip = request.client.host
+
+    if not check_access(client_ip):
+        raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
+
+    return templates.TemplateResponse(
+        "analysis_dashboard.html",
+        {
+            "request": request,
+            "doc_id": doc_id,
+        },
+    )
+
+
+@app.get("/dashboard/consolidated")
+def consolidated_dashboard(request: Request):
+    """Consolidated dashboard showing all analyzed documents"""
+    client_ip = request.client.host
+
+    if not check_access(client_ip):
+        raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
+
+    return templates.TemplateResponse(
+        "consolidated_dashboard.html",
+        {"request": request},
     )
 
 
@@ -514,35 +519,38 @@ def _run_phinance_analysis(job: Dict[str, Any], pdf_path: str):
         job["started_at"] = datetime.utcnow().isoformat()
         _save_job(job)
 
-        from home_ai.finance_agent.src.parser import parse_apple_card_statement
-        from home_ai.finance_agent.src.models import call_phinance_insights
+        import asyncio
+        from pathlib import Path as PathLib
+        from home_ai.finance_agent.src.parser import FinanceStatementParser
 
-        transactions = parse_apple_card_statement(pdf_path)
+        async def run_parser():
+            parser = FinanceStatementParser()
+            pdf_path_obj = PathLib(pdf_path)
+            identity = await parser.get_identity_context(pdf_path_obj, doc_id)
+            summary = await parser.get_structural_summary(identity, pdf_path_obj)
+            result = await parser.extract_transactions(identity, summary, pdf_path_obj)
+            return result
+
+        result = asyncio.run(run_parser())
+        transactions = result.transactions
         logger.info(f"Parsed {len(transactions)} transactions from {pdf_path}")
 
-        if transactions:
-            insights_result = call_phinance_insights(transactions)
+        reports_dir = Path(
+            f"/home/ryzen/projects/home-ai/finance-agent/data/reports/{doc_id}"
+        )
+        reports_dir.mkdir(parents=True, exist_ok=True)
 
-            reports_dir = Path(
-                f"/home/ryzen/projects/home-ai/finance-agent/data/reports/{doc_id}"
-            )
-            reports_dir.mkdir(parents=True, exist_ok=True)
+        with open(reports_dir / "transactions.json", "w") as f:
+            json.dump(transactions, f, indent=2, default=str)
 
-            with open(reports_dir / "transactions.json", "w") as f:
-                json.dump(transactions, f, indent=2, default=str)
-
+        if result.phinance_structured_response:
             with open(reports_dir / "analysis.json", "w") as f:
-                json.dump(insights_result, f, indent=2, default=str)
+                json.dump(result.phinance_structured_response, f, indent=2, default=str)
 
-            job["status"] = "completed"
-            job["completed_at"] = datetime.utcnow().isoformat()
-            job["transaction_count"] = len(transactions)
-            job["reports_dir"] = str(reports_dir)
-        else:
-            job["status"] = "completed"
-            job["completed_at"] = datetime.utcnow().isoformat()
-            job["transaction_count"] = 0
-            job["warning"] = "No transactions found"
+        job["status"] = "completed"
+        job["completed_at"] = datetime.utcnow().isoformat()
+        job["transaction_count"] = len(transactions)
+        job["reports_dir"] = str(reports_dir)
 
         _save_job(job)
         logger.info(
@@ -729,6 +737,28 @@ async def api_chat(request: Request):
             "response": "Sorry, I encountered an error processing your request.",
             "error": str(e),
         }
+
+
+@app.post("/api/proxy/upload")
+async def api_proxy_upload(file: UploadFile = File(...)):
+    """Proxy file upload to SOA1 API."""
+    try:
+        soa1_url = config.services.get("api", "http://localhost:8001")
+
+        # Read file content
+        content = await file.read()
+
+        # Prepare files dict for requests
+        files = {"file": (file.filename, content, file.content_type)}
+
+        # Forward to SOA1 API
+        resp = requests.post(f"{soa1_url}/upload-pdf", files=files, timeout=120)
+
+        # Return response
+        return resp.json()
+    except Exception as e:
+        logger.error(f"Upload proxy error: {e}")
+        return {"status": "error", "message": f"Proxy upload failed: {str(e)}"}
 
 
 # =============================================================================
@@ -1518,8 +1548,8 @@ features:
     with open(CONFIG_FILE, "w") as f:
         f.write(default_config)
 
-# Create default templates
-create_default_templates()
+# Create default templates - DISABLED: using existing templates in templates/ dir
+# create_default_templates()
 
 if __name__ == "__main__":
     logger.info("🚀 Starting SOA1 Web UI - Tailscale Edition...")

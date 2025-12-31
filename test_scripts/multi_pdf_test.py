@@ -16,9 +16,9 @@ from typing import List, Dict, Any, Optional
 # Configuration
 WEBUI_URL = "http://localhost:8080"
 SOA1_API_URL = "http://localhost:8001"
-TEST_PDF_DIR = Path("/home/ryzen/projects/home-ai/finance-agent/data/uploads")
+TEST_PDF_DIR = Path("/home/ryzen/Documents/j666")
 LOG_DIR = Path("/home/ryzen/projects/test_logs")
-NUM_PDFS = 4  # Number of PDFs to test
+NUM_PDFS = 8  # Number of PDFs to test
 
 
 @dataclass
@@ -70,24 +70,20 @@ def upload_pdf(pdf_path: Path) -> tuple[str, StepTiming]:
     try:
         with open(pdf_path, "rb") as f:
             files = {"file": (pdf_path.name, f, "application/pdf")}
-            resp = requests.post(
-                f"{WEBUI_URL}/upload", files=files, allow_redirects=False, timeout=30
-            )
+            resp = requests.post(f"{SOA1_API_URL}/upload-pdf", files=files, timeout=60)
 
-        # Upload returns 303 redirect with doc_id in Location header
-        if resp.status_code == 303:
-            location = resp.headers.get("Location", "")
-            # Parse doc_id from: /?upload=success&doc={doc_id}
-            import re
-
-            match = re.search(r"doc=([^&]+)", location)
-            if match:
-                doc_id = match.group(1)
+        # SOA1 API returns JSON with doc_id
+        if resp.status_code == 200:
+            data = resp.json()
+            doc_id = data.get("doc_id")
+            if doc_id:
                 complete_step(step)
                 return doc_id, step
 
         complete_step(
-            step, success=False, error=f"Unexpected status {resp.status_code}"
+            step,
+            success=False,
+            error=f"Unexpected status {resp.status_code}: {resp.text[:200]}",
         )
         return "", step
     except Exception as e:
