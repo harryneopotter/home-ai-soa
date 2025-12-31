@@ -2,6 +2,77 @@
 
 ## 📅 Session History
 
+### December 31, 2025 - LLM Response Validation & Consolidated Dashboard (Session 10)
+
+#### 🛡️ LLM Response Validation System
+- **Created `home-ai/soa1/utils/llm_validation.py`**: Full Pydantic validation for phinance LLM outputs
+  - `Transaction` model: validates date formats, amount bounds (-1M to 1M), merchant presence
+  - `TransactionsResponse`: handles bare list or wrapped `{"transactions": [...]}` format
+  - `AnalysisResponse`: validates totals, categories, merchants, insights
+  - `LLMValidationError`: rich exception with `feedback_prompt` for retry loops
+  - JSON extraction from markdown code blocks, embedded JSON in prose
+- **Retry Infrastructure (Base Setup)**:
+  - `RetryConfig`: max_attempts, include_previous_response, include_error_feedback
+  - `RetryContext`: tracks attempt number, previous errors
+  - `build_retry_prompt()`: constructs retry prompt with validation feedback
+  - NOT wired yet - ready for integration when needed
+- **Updated `home-ai/soa1/models.py`**:
+  - Added `validate` parameter to `call_phinance()`
+  - Added `call_phinance_validated()` returning typed Pydantic objects
+  - Added `validate_phinance_response()` for standalone validation
+- **Updated `home-ai/soa1/utils/__init__.py`**: exports validation functions
+
+#### ✅ Validation Tests Passing
+- Real phinance output: 25 transactions validated ✅
+- Empty response detection ✅
+- JSON in markdown code blocks extraction ✅
+- Invalid date format rejection ✅
+- Bare list handling (no wrapper) ✅
+- Amount bounds checking ✅
+
+---
+
+### December 31, 2025 - GPU Eviction Fix & Consolidated Dashboard (Session 9)
+
+#### 🐛 GPU Eviction Bug Fixed
+- **Problem**: NemoAgent kept falling back to 96% CPU / 4% GPU during analysis
+- **Root Cause**: `num_gpu: 1` hardcoded in `home-ai/finance-agent/src/models.py` and missing `num_ctx`
+- **Fix Applied**:
+  - `home-ai/finance-agent/src/models.py`: Changed `num_gpu: 1` → `99`, added `num_ctx: 32768` for NemoAgent, `4096` for phinance
+  - `home-ai/soa1/models.py`: Added options block with `num_gpu: 99, num_ctx: 32768`, fixed Ollama response parsing
+
+#### 📊 Consolidated Finance Dashboard
+- **New Files**:
+  - `soa-webui/templates/consolidated_dashboard.html`: Full dashboard with Chart.js visualizations
+  - `soa-webui/templates/analysis_dashboard.html`: Individual analysis view
+- **New API Endpoints**:
+  - `GET /api/reports/consolidated`: Aggregates all reports into single JSON
+  - `GET /dashboard/consolidated`: Serves consolidated dashboard template
+- **Dashboard Features**:
+  - Overview cards (total spending, transaction count, document count)
+  - Spending by category doughnut chart
+  - Top 15 merchants list
+  - Monthly spending trends bar chart
+  - All transactions table with search/filter/sort
+  - AI-generated insights and recommendations
+  - Document summaries for each analyzed PDF
+
+#### 📊 Batch Test Results
+- **8 PDFs processed**: 437 transactions, 84.2 seconds total (~10.5s avg per PDF)
+- **Both models at 100% GPU** throughout entire batch
+- **Reports generated** in `/home/ryzen/projects/home-ai/finance-agent/data/reports/`
+
+#### 🧹 Cleanup
+- Removed duplicate `templates/` directory (moved to `soa-webui/templates/`)
+- Removed stale session files (`session-ses_*.md`, `fail.md`)
+- Added `test_logs/` to `.gitignore`
+
+#### 📝 Git Commit
+- Commit `b3d8252`: "feat: consolidated dashboard + GPU eviction fix + cleanup"
+- Pushed to `origin/main`
+
+---
+
 ### December 28, 2025 - Gemini CLI Context Setup & Documentation (Session 7)
 
 #### 📝 Documentation Rewrite

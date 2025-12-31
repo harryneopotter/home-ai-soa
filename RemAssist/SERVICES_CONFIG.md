@@ -1,5 +1,7 @@
 # 📋 Services Configuration
 
+_Last updated: December 31, 2025_
+
 ## 🏁 Overview
 This document provides a comprehensive reference for all SOA1 services, their configurations, ports, and purposes.
 
@@ -9,7 +11,7 @@ This document provides a comprehensive reference for all SOA1 services, their co
 **Purpose**: Core API for SOA1 agent functionality
 **Port**: 8001
 **Model**: NemoAgent (main orchestrator) via Ollama
-**Status**: ✅ ACTIVE — Running with NemoAgent orchestrator (system prompt enhancement pending)
+**Status**: ✅ ACTIVE — Running with NemoAgent orchestrator
 
 **Key Endpoints**:
 - `GET /health` — Health check
@@ -21,17 +23,29 @@ This document provides a comprehensive reference for all SOA1 services, their co
 ### 1.1 Finance Agent Service
 **Purpose**: Specialized finance analysis using Phinance model
 **Model**: phinance-json (custom Modelfile) on GPU 1
-**Status**: ✅ WORKING — JSON output fixed with custom Modelfile (Dec 25, 2025)
+**Status**: ✅ WORKING — 100% GPU, validated output
 
 ### 2. WebUI Services
 - Service Monitoring UI (secure_webui.py): Port 8080 — ACTIVE
 - Agent Interaction UI (agent_webui.py): Port 8081 — ACTIVE
+- **Consolidated Dashboard**: `/dashboard/consolidated` — Full finance overview with charts
 
 ### 3. MemLayer Service
 - Port 8000 — Not yet implemented
 
 ### 4. Nginx Reverse Proxy
 - Port 80/443 — Not yet configured
+
+## 🖥️ Hardware & Model Configuration
+- **Platform**: Intel X670 (migrated from AMD Threadripper)
+- **GPUs**: 2x NVIDIA GeForce RTX 5060 Ti (16GB VRAM each, 32GB total)
+- **GPU 0**: NemoAgent orchestrator (13GB, 100% GPU)
+- **GPU 1**: phinance-json specialist (4GB, 100% GPU)
+- **Model Settings**:
+  - `num_gpu: 99` — Force full GPU offload
+  - `num_ctx: 32768` — NemoAgent context window
+  - `num_ctx: 4096` — phinance-json context window
+  - `keep_alive: -1` — Models stay loaded indefinitely
 
 ## 🔐 Consent-Gated Analysis Flow
 
@@ -55,45 +69,75 @@ The finance analysis pipeline requires explicit user consent before invoking the
 4. **Poll Status** → `GET /analysis-status/<doc_id>` on WebUI (port 8080)
    - Returns current analysis status and results when complete
 
-### Service Restart Ordering:
-1. Stop WebUI first (port 8080) to avoid stale connections
-2. Stop SOA1 API (port 8001)
-3. Start SOA1 API (wait for `/health` to return OK)
-4. Start WebUI
+## 🛡️ LLM Response Validation
 
-### Model Call Logging:
+**New in Dec 31, 2025**: All phinance LLM responses are validated using Pydantic schemas.
+
+### Validation Features:
+- **Transaction validation**: date format, amount bounds (-1M to 1M), merchant presence
+- **Analysis validation**: totals, categories, merchants, insights structure
+- **JSON extraction**: handles markdown code blocks, embedded JSON
+- **Error feedback**: `LLMValidationError` includes `feedback_prompt` for retry loops
+
+### Usage:
+```python
+from utils.llm_validation import validate_transactions, validate_analysis, LLMValidationError
+
+try:
+    transactions, warnings = validate_transactions(raw_llm_response)
+    analysis, warnings = validate_analysis(raw_llm_response)
+except LLMValidationError as e:
+    print(e.errors)
+    print(e.feedback_prompt)  # Use for retry
+```
+
+### Retry Infrastructure (Base Setup):
+- `RetryConfig`: max_attempts, include_previous_response, include_error_feedback
+- `RetryContext`: tracks attempt number, previous errors
+- `build_retry_prompt()`: constructs retry prompt with validation feedback
+- **Status**: Ready but not wired into call flow yet
+
+## 📊 Dashboard Endpoints
+
+### Consolidated Dashboard
+- **URL**: `http://localhost:8080/dashboard/consolidated`
+- **API**: `GET /api/reports/consolidated`
+- **Features**:
+  - Overview cards (total spending, transactions, documents)
+  - Spending by category chart (doughnut)
+  - Monthly trends chart (bar)
+  - Top 15 merchants
+  - All transactions table with search/filter/sort
+  - AI insights and recommendations
+
+### Monitoring Dashboard
+- **URL**: `http://localhost:8080/monitoring`
+- **Features**:
+  - System overview (CPU, Memory, Disk, Uptime)
+  - Services status
+  - Ollama models and VRAM usage
+  - GPU status (2x RTX 5060 Ti)
+  - Log viewer
+  - Analysis jobs table
+
+## Model Call Logging
 All model calls (NemoAgent and Phinance) are logged to `logs/model_calls.jsonl` with:
 - Timestamp, model name, endpoint, prompt hash
 - Latency (ms), status (success/error)
 - Redacted prompt preview (first 200 chars)
 
-## 🖥️ Hardware & Model Configuration
-- Platform: Intel X670 (migrated from AMD Threadripper)
-- GPUs: 2x NVIDIA GeForce RTX 5060 Ti (16GB VRAM each, 32GB total)
-- GPU 0: NemoAgent orchestrator
-- GPU 1: phinance-json specialist
-- Model keep_alive: Enabled for all loaded models
-- Model config: SOA1 config uses NemoAgent (not qwen2.5)
-
-## 🧠 Architecture
-- NemoAgent is the main orchestrator for SOA1 (not just finance)
-- Architecture:
-  - NemoAgent (GPU 0) orchestrates
-  - phinance-json (GPU 1) as finance specialist
-  - Future: budgeting, knowledge, scheduler agents
-
-## Server startup recommendation
+## Server Startup Recommendation
 - Use the Uvicorn CLI to run the SOA1 API: 
   - Development: `uvicorn home-ai.soa1.api:create_app --factory --reload --host 0.0.0.0 --port 8001`
   - Production: `uvicorn home-ai.soa1.api:create_app --factory --host 0.0.0.0 --port 8001 --log-level info`
 - Sample systemd units: `RemAssist/soa1-api.service`, `RemAssist/soa-webui.service`
 - Use `scripts/start-soa1.sh` and `scripts/stop-soa1.sh` to manage the API during development
-- Log/location recommendations:
-  - Redirect logs to `/var/log/soa1/soa1-api.log` when deploying with systemd
-  - Use log rotation (logrotate) to prevent disk growth
-- Memory/process safety:
-  - Run with a process manager (systemd) to restart on failure
-  - Add resource limits (MemoryLimit) in systemd if needed
+
+### Service Restart Ordering:
+1. Stop WebUI first (port 8080) to avoid stale connections
+2. Stop SOA1 API (port 8001)
+3. Start SOA1 API (wait for `/health` to return OK)
+4. Start WebUI
 
 ## 📄 Log Rotation Configuration
 
@@ -142,23 +186,16 @@ Create `/etc/logrotate.d/soa1`:
 - Finance DB: Grows with transactions, ~1MB per 1000 transactions
 - **Recommended minimum free space**: 10GB on `/home` partition
 
-## 
- 🗂️ Directory Structure
-- See History.md and NEXT_TASKS.md for current state and file locations
+## 🗂️ Key Files Modified (Dec 31, 2025)
 
-## 🔄 Recent Changes & Fixes (December 25, 2025)
-- GPU migration and Ollama fix (models now use GPU, VRAM allocation verified)
-- Model keep_alive and config fixes
-- Dashboard output requirements validated
-- Conversion utility planned (separate file)
-- NemoAgent architecture clarified
-- Unnecessary models unloaded
-- Logging verification task added
-
-## 📝 Next Steps
-- Implement dashboard JSON conversion utility
-- Integrate NemoAgent for anomaly handling
-- Finalize architecture documentation and system prompt
-- Verify logging for all model actions, reasoning, tool calls (with timestamp)
+| File | Changes |
+|------|---------|
+| `home-ai/soa1/utils/llm_validation.py` | **NEW** - Pydantic validation schemas |
+| `home-ai/soa1/models.py` | Added validation integration |
+| `home-ai/soa1/utils/__init__.py` | Exports validation functions |
+| `home-ai/finance-agent/src/models.py` | GPU fix: num_gpu: 99, num_ctx |
+| `soa-webui/templates/consolidated_dashboard.html` | **NEW** - Full dashboard |
+| `soa-webui/reports.py` | Added consolidated API endpoint |
+| `soa-webui/main.py` | Added dashboard route |
 
 ---

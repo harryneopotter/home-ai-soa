@@ -219,6 +219,54 @@ RuntimeError: Unexpected Nemotron response: {'model': 'NemoAgent', 'message': {'
 
 ---
 
+### 2025-12-31: NemoAgent Falls Back to 96% CPU / 4% GPU During Analysis
+
+**Error:**
+```
+ollama ps
+NAME                    ID              SIZE      PROCESSOR          UNTIL
+NemoAgent:latest        3d55db2ea2b0    13 GB     96%/4% CPU/GPU     Forever
+phinance-json:latest    ca839790957e    4.0 GB    100% GPU           Forever
+```
+
+**Context:** During batch PDF analysis, NemoAgent would start at 100% GPU but gradually fall back to mostly CPU. This caused analysis to slow down significantly mid-batch.
+
+**Root Cause:**
+1. **Hardcoded `num_gpu: 1`** in `home-ai/finance-agent/src/models.py` line 87
+2. **Missing `num_ctx` parameter**: Without explicit context size, Ollama may reallocate model layers
+3. **Cascading effect**: When phinance (4GB) loaded, it triggered NemoAgent (13GB) reallocation due to VRAM pressure
+
+**Evidence:**
+- NemoAgent requires ~13GB VRAM
+- Without `num_ctx`, Ollama may reduce layers to fit both models
+- `num_gpu: 1` literally meant "only offload 1 layer to GPU"
+
+**Fix Applied:**
+1. `home-ai/finance-agent/src/models.py`:
+   - Changed `num_gpu: 1` → `num_gpu: 99` (line 87)
+   - Added `num_ctx: 32768` for NemoAgent
+   - Added `num_ctx: 4096` for phinance-json
+
+2. `home-ai/soa1/models.py`:
+   - Added `options` block with `num_gpu: 99, num_ctx: 32768`
+   - Fixed Ollama response parsing
+
+**Verification:**
+```bash
+$ ollama ps
+NAME                    ID              SIZE      PROCESSOR    UNTIL   
+phinance-json:latest    ca839790957e    4.0 GB    100% GPU     Forever    
+NemoAgent:latest        3d55db2ea2b0    13 GB     100% GPU     Forever    
+```
+
+**Performance Result:**
+- 8 PDFs processed in 84.2 seconds (~10.5s avg)
+- Both models stayed at 100% GPU throughout entire batch
+
+**Status:** ✅ RESOLVED
+
+---
+
 ## Template for New Entries
 
 ```markdown

@@ -1,118 +1,107 @@
 # 📋 RemAssist — Unified Task Queue
 *Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-_Last updated: December 27, 2025 (Session 4)_
+_Last updated: December 31, 2025 (Session 10)_
 
 ---
 
 ## 🔍 Current System Snapshot
 - ✅ Working: SOA1 API, WebUI, Ollama, MemLayer, finance pipeline, E2E tests passing
-- ✅ GPU Status: NemoAgent (9.4GB, GPU 0, 100%), phinance-json (4GB, GPU 1, 100%)
-- ✅ Performance: Analysis pipeline ~9.4s total (transaction_extraction ~1.6s, anomaly_check ~7.8s)
-- ✅ **Gemini CLI Context**: `GEMINI.md` rewritten with full project context and mandatory tracking rules.
+- ✅ GPU Status: NemoAgent (13GB, GPU 0, 100%), phinance-json (4GB, GPU 1, 100%)
+- ✅ GPU Fix: `num_gpu: 99`, `num_ctx: 32768` applied to all model calls
+- ✅ Performance: 8 PDFs in 84s (~10.5s avg), 437 transactions extracted
+- ✅ **Consolidated Dashboard**: `/dashboard/consolidated` with charts, tables, filtering
+- ✅ **LLM Response Validation**: Pydantic schemas for phinance output validation
+- ✅ **Retry Infrastructure**: Base setup ready (not wired yet)
 - ✅ Consent endpoint registered at `/api/consent`
 - ✅ Phinance model calls now logged to `logs/model_calls.jsonl`
-- ✅ Smoke test (userflow_test.py) passing with consent flow
-- ✅ Integration test (integration_test_12_files.py N=1) passing
 - ✅ Monitoring Dashboard: `/monitoring` endpoint with system stats, services, GPUs, logs, jobs
-- ✅ Dashboard JSON converter integrated - auto-generates `reports/{doc_id}/dashboard/` after analysis
-- ✅ SSE event streaming: `/analysis-events/{doc_id}` for real-time pipeline progress
-- ✅ Per-step timing: `/analysis-timing/{doc_id}` with detailed step durations
-- ✅ NemoAgent anomaly detection integrated into analysis pipeline
-- ✅ **Orchestrator prompt integration** - `agent.py` now loads from `orchestrator.md` file
-- ✅ **Config cleanup** - Removed duplicate system prompts from `config.yaml` (162→57 lines)
-- ✅ **Analysis History UI** - Enhanced `/api/analysis/jobs` with timing, steps, anomalies; expandable rows in monitoring dashboard
 
 ---
 
 ## 🚀 Immediate Priority Tasks
 
-### 0. Documentation & Agent Context ✅ COMPLETED (Dec 28, 2025)
-- [x] Analyze monorepo structure and ignore patterns
-- [x] Consolidate service ports and technology stack documentation
-- [x] Rewrite `GEMINI.md` for Gemini CLI grounding
-- [x] Establish mandatory `History.md`, `NEXT_TASKS.md`, and `errors.md` update flow
+### 0. LLM Response Validation ✅ COMPLETED (Dec 31, 2025)
+- [x] Create Pydantic schemas for phinance LLM response validation
+- [x] Implement JSON extraction from markdown code blocks
+- [x] Add date format validation, amount bounds checking
+- [x] Handle bare list responses (no wrapper object)
+- [x] Create retry infrastructure base (RetryConfig, RetryContext, build_retry_prompt)
+- [x] Integrate validation into `call_phinance()` with optional `validate` parameter
+- [x] Add `call_phinance_validated()` for typed returns
+- [x] Test with real phinance output files
 
-### 0. Smoke Test & Integration Validation ✅ COMPLETED
-- [x] Run single-upload smoke test: upload PDF → POST /api/consent → POST /analyze-confirm → poll /analysis-status → verify DB records & files
-- [x] Run integration_test_12_files.py with N=1
-- [x] Verify `logs/model_calls.jsonl` contains NemoAgent and Phinance entries
-- [ ] Scale integration_test_12_files.py to N=12 (optional stress test)
+### 0.1 GPU Eviction Fix ✅ COMPLETED (Dec 31, 2025)
+- [x] Fix `num_gpu: 1` → `99` in finance-agent/src/models.py
+- [x] Add `num_ctx: 32768` for NemoAgent, `num_ctx: 4096` for phinance
+- [x] Fix Ollama response parsing in soa1/models.py
+- [x] Verify 100% GPU usage during batch test
 
-### 0.5. Monitoring Dashboard ✅ COMPLETED (Dec 26, 2025)
-- [x] Add monitoring API endpoints to WebUI (GET /api/ollama/status, /api/gpu/status, /api/logs/list, /api/logs/{name}, /api/logs/{name}/tail, /api/analysis/jobs)
-- [x] Create monitoring.html template with brutalist dark theme
-- [x] System overview (CPU, Memory, Disk, Uptime)
-- [x] Services status display
-- [x] Ollama models and loaded models display
-- [x] GPU status (2x RTX 5060 Ti) with memory/utilization bars
-- [x] Log viewer with tabs (WebUI, Model Calls, SOA1 API)
-- [x] Analysis jobs table
-- [x] Auto-refresh (5s status, 3s logs)
+### 0.2 Consolidated Dashboard ✅ COMPLETED (Dec 31, 2025)
+- [x] Create `/api/reports/consolidated` endpoint
+- [x] Create consolidated_dashboard.html with Chart.js
+- [x] Add spending by category chart
+- [x] Add monthly trends chart
+- [x] Add transactions table with search/filter
+- [x] Add insights and recommendations display
+- [x] Test with 8 PDFs batch
 
-### 1. Dashboard JSON Conversion Utility ✅ COMPLETED (Dec 26, 2025)
-- [x] Implement `/home/ryzen/projects/home-ai/soa1/utils/dashboard_json.py` to convert phinance output to dashboard format
-- [x] Integrate converter into analysis pipeline (auto-generates `dashboard/` subdirectory after analysis)
-- [x] Validate output against dashboard requirements (categories aggregated, dates normalized, amounts negated)
-- [x] Integrate NemoAgent for anomaly/edge case handling
-- [x] Implement event streaming (SSE) for staged parsing events (STARTED, METADATA_READY, HEADERS_READY, TRANSACTIONS_READY, INSIGHTS_READY, ANOMALY_CHECK, COMPLETED)
-- [x] Add per-step timing instrumentation to `_run_phinance_analysis` (metadata_extraction, headers_extraction, transaction_extraction, insights_generation, anomaly_check)
-- [x] Implement SQLite persistence for transactions:
-  - Added `doc_id` column to transactions table
-  - Added `get_transactions_by_doc(doc_id)` to fetch transactions by document
-  - Added `has_transactions_for_doc(doc_id)` to check if transactions exist (avoids re-parsing)
-  - Added `save_transactions` alias for backward compatibility
-- [x] Add a test that ensures parsed transactions are stored without requiring re-parse (`test_storage.py`)
+### 1. Wire Retry Logic (When Needed)
+- [ ] Integrate retry loop into `call_phinance()` using `build_retry_prompt()`
+- [ ] Add configurable max_attempts (default: 3)
+- [ ] Log retry attempts with validation errors
+- [ ] Add metrics for retry success rate
 
-### 1.1 Keep-Alive & Ollama API Standardization (NEW - High Priority)
-- [ ] Audit & convert `home-ai/soa1/models.py` to use Ollama native `/api/chat` and ensure payload includes `"keep_alive": -1`. Add unit tests and a local smoke script.
-- [ ] Audit & convert `home-ai/finance-agent/src/models.py` to use Ollama native `/api/chat` (or `/api/generate`) and include `"keep_alive": -1` for specialist model calls. Add unit tests.
-- [ ] Add unit/integration test verifying that models are pinned (via `ollama ps` showing `UNTIL: Forever`) after load.
-- [ ] Add a linter or CI check that flags calls to `/v1` endpoints where `keep_alive` is required.
-- [ ] Update `RemAssist/OLLAMA_MIGRATION_GUIDE.md` with explicit guidance: "Prefer `/api/*` for pinning models; `/v1` may ignore `keep_alive`."
-- [ ] Optional: Design a small, secure OpenAI-compat shim that forwards `/v1` → `/api` while preserving `keep_alive` (Phase-2).
+### 1.1 Keep-Alive & Ollama API Standardization
+- [x] `home-ai/soa1/models.py` - uses `/api/chat` with `keep_alive: -1` ✅
+- [x] `home-ai/finance-agent/src/models.py` - uses `num_gpu: 99`, `num_ctx` ✅
+- [ ] Add unit/integration test verifying models are pinned (`ollama ps` shows `UNTIL: Forever`)
+- [ ] Add linter/CI check for `/v1` endpoints where `keep_alive` is required
 
-### 2. Orchestrator System Prompt & Architecture ✅ COMPLETED (Dec 26, 2025 - Session 3)
-- [x] Create `/home/ryzen/projects/home-ai/ARCHITECTURE.md` documenting SOA1 system architecture
-- [x] Create `/home/ryzen/projects/home-ai/soa1/prompts/orchestrator.md` with **model-agnostic** system prompt (NO Modelfile - user will swap models)
-- [x] Document routing logic and orchestrator rules
-- [x] Add model verification endpoint `/api/models/verify` - returns orchestrator config, system prompt preview, loaded models
-- [x] Add integration test `test_scripts/test_model_verification.py` to assert orchestrator is the only UI-facing model
-- [x] **Integrate orchestrator.md into agent.py** - Modified `_load_system_prompt()` to load from file with fallback chain
-- [x] **Clean up config.yaml** - Removed duplicate system prompts, simplified from 162 to 57 lines
+### 2. Input Validation & Sanitization
+- [ ] Audit XSS vulnerabilities in dashboard templates (merchant names, categories)
+- [ ] Add path traversal protection for PDF uploads
+- [ ] Verify Jinja2 autoescape is enabled
+- [ ] Add input length limits to all API endpoints
 
-### 3. SOA1 API Runtime Standardization ✅ COMPLETED (Dec 26, 2025)
-- [x] Add systemd unit samples at `RemAssist/soa1-api.service` and `RemAssist/soa-webui.service`
-- [x] Add start/stop scripts at `scripts/start-soa1.sh`, `scripts/stop-soa1.sh`
-- [x] Add cleanup script at `scripts/cleanup-soa1.sh`
-- [x] Add log rotation recommendations to `SERVICES_CONFIG.md`
-- [x] Verify `/upload-pdf` and `/health` endpoints (verified via E2E test)
+### 3. UI Enhancements
+- [x] Consolidated dashboard with charts ✅
+- [ ] Add date range picker to consolidated dashboard
+- [ ] Add export to CSV/PDF functionality
+- [ ] Add spending alerts/thresholds
+- [ ] Mobile responsive improvements
+
+### 4. Performance Optimizations
+- [ ] Parallel PDF processing for batch uploads
+- [ ] Transaction caching to avoid re-extraction
+- [ ] Lazy loading for large transaction tables
 
 ---
 
 ## 🔜 Potential Next Steps
 
-### 4. Chat Context & Memory Improvements
+### 5. Chat Context & Memory Improvements
 - [ ] Implement chat history persistence (currently session-only)
 - [ ] Add conversation memory to MemLayer for cross-session context
-- [ ] Improve finance context injection in `/api/chat` (currently keyword-based)
-
-### 5. UI Enhancements ✅ COMPLETED (Dec 28, 2025)
-- [x] Redesign `index.html` to match Brutalist Dark Theme (`monitoring.html`)
-- [x] Integrate Chat & File Upload into main dashboard
-- [x] Add `/api/proxy/upload` to WebUI backend to support file uploads
-- [x] Mobile responsive improvements (Tailwind grid layout)
-- [ ] Add analysis results display in chat (cards, charts)
-- [ ] Add spending dashboard page using dashboard JSON output
+- [ ] Improve finance context injection in `/api/chat`
 
 ### 6. Multi-Document Analysis
-- [ ] Support batch PDF uploads
+- [ ] Support batch PDF uploads in single request
 - [ ] Cross-document spending comparison
 - [ ] Trend analysis across time periods
+- [ ] Merchant normalization (same merchant, different names)
+
+### 7. Security Hardening
+- [ ] Rate limiting on all API endpoints
+- [ ] API key authentication for sensitive endpoints
+- [ ] Audit logging for all data access
+- [ ] HTTPS enforcement
 
 ---
 
-## 🏁 Recently Completed (Dec 26, 2025 - Session 3)
-- **Orchestrator Prompt Integration**: Modified `agent.py` to load system prompt from `orchestrator.md` file instead of inline config
-- **Config Cleanup**: Removed 100+ line duplicate system prompts from `config.yaml` (162→57 lines)
-- **Verified WebUI**: Chat consent flow, analysis display, and report generation all working
+## 🏁 Recently Completed (Dec 31, 2025 - Sessions 9 & 10)
+- **GPU Eviction Fix**: Models now stay at 100% GPU throughout analysis
+- **Consolidated Dashboard**: Full dashboard with charts, tables, AI insights
+- **LLM Response Validation**: Pydantic schemas catch malformed LLM responses
+- **Retry Infrastructure**: Base setup ready for when failures occur
+- **Batch Testing**: 8 PDFs, 437 transactions, 84s total - all validated
