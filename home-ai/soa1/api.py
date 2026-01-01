@@ -26,6 +26,13 @@ from utils.errors import (
 )
 from utils.rate_limiter import get_limiter_for_endpoint
 
+try:
+    from home_ai.finance_agent.src import storage as chat_storage
+
+    CHAT_STORAGE_AVAILABLE = True
+except ImportError:
+    CHAT_STORAGE_AVAILABLE = False
+
 logger = get_logger("api")
 
 _pending_documents: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
@@ -223,9 +230,30 @@ def create_app() -> FastAPI:
         )
 
         try:
+            if CHAT_STORAGE_AVAILABLE:
+                chat_storage.init_db()
+                chat_storage.save_chat_message(session_id, "user", req.message)
+
             document_context = _get_pending_document_context(session_id)
-            result = agent.ask(req.message, document_context=document_context)
+
+            chat_history = []
+            if CHAT_STORAGE_AVAILABLE:
+                history = chat_storage.get_chat_history(session_id, limit=20)
+                chat_history = [
+                    {"role": h["role"], "content": h["content"]} for h in history[:-1]
+                ]
+
+            result = agent.ask(
+                req.message,
+                document_context=document_context,
+                chat_history=chat_history,
+            )
             logger.info(f"[{client_ip}] Chat response generated successfully")
+
+            if CHAT_STORAGE_AVAILABLE:
+                chat_storage.save_chat_message(
+                    session_id, "assistant", result["answer"]
+                )
 
             return ChatResponse(
                 response=result["answer"],

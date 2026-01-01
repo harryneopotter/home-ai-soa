@@ -176,9 +176,18 @@ class SOA1Agent:
     # Main Agent Logic
     # ---------------------------------------------------------
     def ask(
-        self, query: str, document_context: Optional[Dict[str, Any]] = None
+        self,
+        query: str,
+        document_context: Optional[Dict[str, Any]] = None,
+        chat_history: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
-        """Main agent query method with enhanced error handling"""
+        """Main agent query method with enhanced error handling
+
+        Args:
+            query: User's question
+            document_context: Optional document/transaction context
+            chat_history: Optional list of previous messages [{"role": "user/assistant", "content": "..."}]
+        """
 
         # Validate input
         if not query or not isinstance(query, str):
@@ -202,6 +211,13 @@ class SOA1Agent:
         doc_context_block = self._format_document_context(document_context)
 
         # 3. Build model conversation
+        convo = []
+
+        if chat_history:
+            for msg in chat_history:
+                if msg.get("role") in ("user", "assistant") and msg.get("content"):
+                    convo.append({"role": msg["role"], "content": msg["content"]})
+
         content_parts = []
 
         if doc_context_block:
@@ -215,12 +231,12 @@ class SOA1Agent:
             f"Now answer the following question for the user:\n{query}"
         )
 
-        convo = [
+        convo.append(
             {
                 "role": "user",
                 "content": "\n\n".join(content_parts),
             }
-        ]
+        )
 
         # 4. Model inference
         try:

@@ -101,6 +101,21 @@ def init_db() -> sqlite3.Connection:
         )
     """)
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            user_id TEXT DEFAULT 'default',
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_history(session_id, created_at)
+    """)
+
     conn.commit()
     return conn
 
@@ -452,3 +467,63 @@ def save_document(document_id: str, filename: str, pages: int, bytes_size: int) 
             (document_id, filename, pages, bytes_size, datetime.utcnow().isoformat()),
         )
         conn.commit()
+
+
+# -----------------------------
+# Chat History Persistence
+# -----------------------------
+def save_chat_message(
+    session_id: str, role: str, content: str, user_id: str = "default"
+) -> int:
+    """Save a single chat message to history. Returns message ID."""
+    with get_db() as conn:
+        cursor = conn.execute(
+            "INSERT INTO chat_history(session_id, user_id, role, content) VALUES(?,?,?,?)",
+            (session_id, user_id, role, content),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+
+def get_chat_history(session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    """Retrieve chat history for a session, ordered by time."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT role, content, created_at FROM chat_history 
+               WHERE session_id = ? ORDER BY created_at ASC LIMIT ?""",
+            (session_id, limit),
+        ).fetchall()
+        return [{"role": r[0], "content": r[1], "created_at": r[2]} for r in rows]
+
+
+def clear_chat_history(session_id: str) -> int:
+    """Clear chat history for a session. Returns count of deleted messages."""
+    with get_db() as conn:
+        cursor = conn.execute(
+            "DELETE FROM chat_history WHERE session_id = ?", (session_id,)
+        )
+        conn.commit()
+        return cursor.rowcount
+
+
+def get_recent_sessions(
+    user_id: str = "default", limit: int = 10
+) -> List[Dict[str, Any]]:
+    """Get list of recent chat sessions for a user."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT session_id, MIN(created_at) as started, MAX(created_at) as last_message,
+                      COUNT(*) as message_count
+               FROM chat_history WHERE user_id = ?
+               GROUP BY session_id ORDER BY last_message DESC LIMIT ?""",
+            (user_id, limit),
+        ).fetchall()
+        return [
+            {
+                "session_id": r[0],
+                "started": r[1],
+                "last_message": r[2],
+                "message_count": r[3],
+            }
+            for r in rows
+        ]

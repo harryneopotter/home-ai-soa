@@ -462,3 +462,116 @@ async def analysis_timing(doc_id: str):
         pass
 
     raise HTTPException(status_code=404, detail=f"No analysis found for {doc_id}")
+
+
+@router.post("/api/reports/compare")
+async def api_compare_documents(doc_ids: List[str]):
+    """Compare spending patterns between multiple documents."""
+    if len(doc_ids) < 2:
+        raise HTTPException(
+            status_code=400, detail="Need at least 2 documents to compare"
+        )
+
+    if len(doc_ids) > 10:
+        raise HTTPException(
+            status_code=400, detail="Maximum 10 documents for comparison"
+        )
+
+    if not FINANCE_REPORTS_DIR.exists():
+        raise HTTPException(status_code=404, detail="Reports directory not found")
+
+    documents: Dict[str, Dict[str, Any]] = {}
+
+    for doc_id in doc_ids:
+        doc_dir = FINANCE_REPORTS_DIR / doc_id
+        if not doc_dir.exists():
+            continue
+
+        analysis = _load_json_if_exists(doc_dir / "analysis.json") or {}
+        tx_data = _load_json_if_exists(doc_dir / "transactions.json")
+
+        transactions = []
+        if isinstance(tx_data, list):
+            transactions = tx_data
+        elif isinstance(tx_data, dict):
+            transactions = tx_data.get("transactions", [])
+
+        documents[doc_id] = {
+            "total_spent": analysis.get("total_spent", 0) or 0,
+            "transaction_count": len(transactions),
+            "by_category": analysis.get("by_category", {}),
+            "transactions": transactions,
+            "date_range": analysis.get("date_range", {}),
+        }
+
+    if len(documents) < 2:
+        raise HTTPException(status_code=404, detail="Not enough valid documents found")
+
+    all_categories = set()
+    all_merchants = set()
+    for doc in documents.values():
+        all_categories.update(doc["by_category"].keys())
+        for tx in doc["transactions"]:
+            all_merchants.add(tx.get("merchant", "Unknown"))
+
+    category_comparison: Dict[str, Dict[str, float]] = {}
+    for cat in all_categories:
+        category_comparison[cat] = {}
+        for doc_id, doc in documents.items():
+            category_comparison[cat][doc_id] = doc["by_category"].get(cat, 0)
+
+    merchant_comparison: Dict[str, Dict[str, float]] = {}
+    for merchant in all_merchants:
+        merchant_comparison[merchant] = {}
+        for doc_id, doc in documents.items():
+            total = sum(
+                float(tx.get("amount", 0) or 0)
+                for tx in doc["transactions"]
+                if tx.get("merchant") == merchant
+            )
+            if total > 0:
+                merchant_comparison[merchant][doc_id] = round(total, 2)
+
+    merchant_comparison = dict(
+        sorted(
+            merchant_comparison.items(),
+            key=lambda x: max(x[1].values()) if x[1] else 0,
+            reverse=True,
+        )[:20]
+    )
+
+    totals_comparison = {
+        doc_id: {
+            "total_spent": round(doc["total_spent"], 2),
+            "transaction_count": doc["transaction_count"],
+            "avg_transaction": round(
+                doc["total_spent"] / max(doc["transaction_count"], 1), 2
+            ),
+        }
+        for doc_id, doc in documents.items()
+    }
+
+    shared_merchants = set()
+    for merchant in all_merchants:
+        docs_with_merchant = [
+            doc_id
+            for doc_id, doc in documents.items()
+            if any(tx.get("merchant") == merchant for tx in doc["transactions"])
+        ]
+        if len(docs_with_merchant) == len(documents):
+            shared_merchants.add(merchant)
+
+    return {
+        "compared_documents": list(documents.keys()),
+        "totals": totals_comparison,
+        "by_category": category_comparison,
+        "top_merchants": merchant_comparison,
+        "shared_merchants": list(shared_merchants),
+        "generated_at": datetime.now().isoformat(),
+    }
+
+
+@router.get("/api/reports/compare/{doc_id1}/{doc_id2}")
+async def api_compare_two_documents(doc_id1: str, doc_id2: str):
+    """Convenience endpoint to compare exactly two documents via GET."""
+    return await api_compare_documents([doc_id1, doc_id2])

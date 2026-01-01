@@ -2,6 +2,42 @@
 
 ## 📅 Session History
 
+### December 31, 2025 - Chat History, Cross-Doc Compare, Merchant Normalization (Session 13)
+
+#### 💬 Chat History Persistence
+- **File Modified:** `home-ai/finance-agent/src/storage.py`
+  - Added `chat_history` table schema in `init_db()`
+  - Functions: `save_chat_message()`, `get_chat_history()`, `clear_chat_history()`, `get_recent_sessions()`
+- **File Modified:** `home-ai/soa1/api.py`
+  - Import `chat_storage` module with `CHAT_STORAGE_AVAILABLE` flag
+  - `/api/chat` endpoint now saves user/assistant messages and loads history
+- **File Modified:** `home-ai/soa1/agent.py`
+  - `ask()` method now accepts `chat_history: Optional[List[Dict[str, str]]]` parameter
+  - Prepends chat history to conversation for multi-turn context
+
+#### 📊 Cross-Document Comparison
+- **File Modified:** `soa-webui/reports.py`
+  - New endpoint: `POST /api/reports/compare` - compare spending across 2-10 documents
+    - Returns: totals comparison, category breakdown per doc, top merchants, shared merchants
+  - New endpoint: `GET /api/reports/compare/{doc_id1}/{doc_id2}` - convenience GET for 2-doc compare
+
+#### 🏷️ Merchant Normalization Utility
+- **File Created:** `home-ai/soa1/utils/merchant_normalizer.py`
+  - 40+ regex patterns for common merchants (Amazon, Uber, Starbucks, Netflix, etc.)
+  - `normalize_merchant(raw_name)` → (normalized_name, category, confidence)
+  - `normalize_transactions(tx_list)` - normalizes merchant names in place
+  - `get_merchant_stats(tx_list)` - reports normalization statistics
+  - Categories inferred: Shopping, Food & Dining, Transportation, Entertainment, Groceries, Gas, Health, etc.
+- **File Modified:** `home-ai/soa1/utils/__init__.py`
+  - Added exports for `normalize_merchant`, `normalize_transactions`, `get_merchant_stats`, `MERCHANT_PATTERNS`
+
+#### 🧪 Keep-Alive Integration Test
+- **File Created:** `test_scripts/test_ollama_keepalive_integration.py`
+  - Tests `ollama ps` shows "Forever" for loaded models
+  - Verifies NemoAgent and phinance-json are pinned with `keep_alive: -1`
+
+---
+
 ### December 31, 2025 - Performance Optimizations (Session 12)
 
 #### ⚡ Parallel Batch PDF Processing
