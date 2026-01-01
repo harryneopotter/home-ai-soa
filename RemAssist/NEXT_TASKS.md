@@ -1,7 +1,7 @@
 # 📋 RemAssist — Unified Task Queue
 *Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-_Last updated: January 1, 2026 (Session 14)_
+_Last updated: January 1, 2026 (Session 15)_
 
 ---
 
@@ -21,10 +21,21 @@ _Last updated: January 1, 2026 (Session 14)_
 - ✅ Consent endpoint registered at `/api/consent`
 - ✅ Phinance model calls now logged to `logs/model_calls.jsonl`
 - ✅ Monitoring Dashboard: `/monitoring` endpoint with system stats, services, GPUs, logs, jobs
+- ✅ **Upload Response Architecture**: LLM-generated upload responses (Session 15)
+- ⚠️ **Known Issue**: Upload response uses hardcoded frontend string instead of LLM response
 
 ---
 
 ## 🚀 Immediate Priority Tasks
+
+### 0. Upload Response Architecture Fix ✅ COMPLETED (Session 15)
+**Reference:** `RemAssist/LLM_DRIVEN_RESPONSES.md`
+
+- [x] Modify `/upload-pdf` to call `SOA1Agent.ask()` after successful upload
+- [x] Pass document context (filename, pages, size, detected type) to agent
+- [x] LLM generates contextual acknowledgment following orchestrator.md guidelines
+- [x] Update frontend to display API response directly (remove hardcoded fallback)
+- [x] Test upload flow returns proper LLM-generated response with options
 
 ### 5. Chat Context & Memory Improvements ✅ COMPLETED (Dec 31, 2025)
 - [x] Implement chat history persistence (`chat_history` table in storage.py)

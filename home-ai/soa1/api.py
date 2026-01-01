@@ -517,22 +517,7 @@ def create_app() -> FastAPI:
                 "bytes": result.get("file_size_bytes", 0),
             }
 
-            logger.info(f"[{client_ip}] Returning upload payload: {payload}")
-            # Create consent request message via orchestrator and include in upload response
-            from orchestrator import Orchestrator
-
-            orchestrator = Orchestrator()
-            # Offer the finance intent as recommended
-            orchestrator.pending_intent_offer = orchestrator._infer_intent("finance")
-            orchestrator.pending_specialist = "phinance"
-
-            payload["consent_request"] = {
-                "message": "I can involve the Finance Specialist for deeper insights. Do you want me to proceed?",
-                "intent": "SPECIALIST_ANALYSIS",
-                "specialist": "phinance",
-                "job_id": job_id,
-            }
-
+            # Track document in session for context injection
             session_id = _get_session_id(request)
             _add_pending_document(
                 session_id,
@@ -546,21 +531,49 @@ def create_app() -> FastAPI:
                 },
             )
 
-            return JSONResponse(content=payload)
             logger.info(
                 f"[{client_ip}] PDF uploaded: {result.get('pages_processed')} pages, {result.get('word_count')} words"
             )
 
-            return JSONResponse(
-                content={
-                    "status": "UPLOADED",
-                    "file_id": str(uuid.uuid4()),
-                    "job_id": job_id,
-                    "filename": result.get("filename"),
-                    "pages": result.get("pages_processed"),
-                    "bytes": result.get("file_size_bytes", 0),
-                }
-            )
+            # Build document context for LLM response generation
+            document_context = {
+                "documents": [
+                    {
+                        "doc_id": doc_id,
+                        "filename": result.get("filename"),
+                        "pages": result.get("pages_processed", 0),
+                        "size_kb": round(result.get("file_size_bytes", 0) / 1024, 1),
+                        "upload_time": datetime.utcnow().isoformat(),
+                        "detected_type": "financial_document",
+                        "preview_text": result.get("text_preview", "")[:500]
+                        if result.get("text_preview")
+                        else "",
+                    }
+                ],
+                "session_id": session_id,
+            }
+
+            # Get LLM-generated response for the upload
+            # This follows the LLM-Driven Responses principle (see RemAssist/LLM_DRIVEN_RESPONSES.md)
+            agent_response = None
+            try:
+                agent = SOA1Agent()
+                agent_result = agent.ask(
+                    query=f"I just uploaded a document: {result.get('filename')}",
+                    document_context=document_context,
+                )
+                agent_response = agent_result.get("answer", "")
+                logger.info(
+                    f"[{client_ip}] LLM generated upload response ({len(agent_response)} chars)"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[{client_ip}] Failed to get LLM response for upload: {e}"
+                )
+                # Graceful degradation - continue without LLM response
+
+            payload["agent_response"] = agent_response
+            return JSONResponse(content=payload)
 
         except Exception as e:
             # Log full stack trace for debugging

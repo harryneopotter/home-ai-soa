@@ -15,6 +15,12 @@ Before making ANY changes to the `home-ai/` project, agents MUST read and follow
    - Implementation order is mandatory
    - Each file has strict boundaries (must contain / must not do)
 
+3. **`RemAssist/LLM_DRIVEN_RESPONSES.md`** — User-facing communication principle
+   - ALL user-facing text MUST come from LLM, not hardcoded strings
+   - Upload responses, errors, status updates → route through agent
+   - Frontend displays API response as-is, no fallback strings
+   - Prevents communication fragmentation across codebase
+
 **If there is ANY conflict: `IMPLEMENTATION_GUIDE.md` overrides everything.**
 
 ---
@@ -31,6 +37,15 @@ Before making ANY changes to the `home-ai/` project, agents MUST read and follow
 - Pass prompt via Ollama API `system` parameter, not baked into model
 
 **phinance-json DOES use a Modelfile** (it's a fixed specialist, not swappable).
+
+### LLM-Driven Responses (NO Hardcoded User Messages)
+
+**DO NOT add hardcoded user-facing strings in frontend or backend.**
+
+- All responses displayed to user must originate from `SOA1Agent.ask()`
+- API endpoints return `agent_response` field with LLM-generated text
+- Frontend displays `data.agent_response` directly
+- See `RemAssist/LLM_DRIVEN_RESPONSES.md` for full explanation and anti-patterns
 
 ---
 

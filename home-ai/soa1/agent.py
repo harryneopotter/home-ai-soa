@@ -2,6 +2,8 @@ from typing import List, Dict, Any, Optional
 import yaml
 from datetime import datetime
 import os, pathlib
+import re
+import json
 
 from memory import MemoryClient
 from model import ModelClient
@@ -14,6 +16,8 @@ from utils.errors import ValidationError, ServiceError, InternalError
 logger = get_logger("agent")
 
 DEFAULT_ORCHESTRATOR_PROMPT_PATH = "prompts/orchestrator.md"
+
+INVOKE_PATTERN = re.compile(r"\[INVOKE:phinance\]", re.IGNORECASE)
 
 
 def _load_system_prompt(base_dir: str, cfg: dict) -> str:
@@ -164,6 +168,112 @@ class SOA1Agent:
         lines.append("[/DOCUMENT CONTEXT]")
         return "\n".join(lines)
 
+    def _invoke_phinance(self, document_context: Optional[Dict[str, Any]]) -> str:
+        """
+        Invoke the phinance model to analyze financial documents.
+        Returns a user-friendly summary of the analysis results.
+        """
+        if not document_context or not document_context.get("documents"):
+            return "I don't have any documents loaded to analyze. Please upload a document first."
+
+        try:
+            from models import call_phinance
+
+            docs = document_context.get("documents", [])
+            doc_ids = [d.get("doc_id") for d in docs if d.get("doc_id")]
+
+            if not doc_ids:
+                return "No document IDs found. Please upload a document first."
+
+            try:
+                from home_ai.finance_agent.src import storage as fa_storage
+
+                all_transactions = []
+                for doc_id in doc_ids:
+                    txns = fa_storage.get_transactions_by_doc(doc_id)
+                    if txns:
+                        all_transactions.extend(txns)
+            except Exception as e:
+                logger.warning(f"Could not load transactions from storage: {e}")
+                all_transactions = []
+
+            if not all_transactions:
+                return (
+                    "I couldn't find any transaction data for these documents. "
+                    "The documents may need to be processed first. "
+                    "Would you like me to extract the transactions?"
+                )
+
+            payload = {
+                "transactions": all_transactions,
+                "currency": "USD",
+                "request_type": "full_analysis",
+            }
+
+            logger.info(f"Invoking phinance with {len(all_transactions)} transactions")
+            raw_response = call_phinance(json.dumps(payload))
+
+            try:
+                analysis = json.loads(raw_response)
+            except json.JSONDecodeError:
+                analysis = {"raw": raw_response}
+
+            return self._format_analysis_response(analysis, len(all_transactions))
+
+        except Exception as e:
+            logger.error(f"Phinance invocation failed: {e}")
+            return f"I encountered an issue while analyzing your documents: {str(e)}"
+
+    def _format_analysis_response(self, analysis: Dict[str, Any], tx_count: int) -> str:
+        """Format phinance analysis results into user-friendly text."""
+        lines = [f"Here's what I found from analyzing {tx_count} transactions:\n"]
+
+        total = analysis.get("total_spent") or analysis.get("total")
+        if total:
+            lines.append(f"📊 **Total Spending**: ${abs(float(total)):,.2f}\n")
+
+        categories = analysis.get("categories") or analysis.get("by_category", {})
+        if categories:
+            lines.append("💰 **By Category**:")
+            sorted_cats = sorted(
+                categories.items(), key=lambda x: abs(float(x[1])), reverse=True
+            )
+            for cat, amount in sorted_cats[:5]:
+                lines.append(f"  • {cat.title()}: ${abs(float(amount)):,.2f}")
+            lines.append("")
+
+        merchants = analysis.get("top_merchants") or analysis.get("merchants", [])
+        if merchants:
+            lines.append("🏪 **Top Merchants**:")
+            if isinstance(merchants, dict):
+                sorted_merch = sorted(
+                    merchants.items(), key=lambda x: abs(float(x[1])), reverse=True
+                )[:5]
+                for merch, amount in sorted_merch:
+                    lines.append(f"  • {merch}: ${abs(float(amount)):,.2f}")
+            elif isinstance(merchants, list):
+                for m in merchants[:5]:
+                    if isinstance(m, dict):
+                        name = m.get("name") or m.get("merchant", "Unknown")
+                        amt = m.get("amount") or m.get("total", 0)
+                        lines.append(f"  • {name}: ${abs(float(amt)):,.2f}")
+            lines.append("")
+
+        insights = analysis.get("insights") or analysis.get("recommendations", [])
+        if insights:
+            lines.append("🔍 **Insights**:")
+            if isinstance(insights, list):
+                for insight in insights[:3]:
+                    lines.append(f"  • {insight}")
+            elif isinstance(insights, str):
+                lines.append(f"  • {insights}")
+            lines.append("")
+
+        lines.append(
+            "Would you like me to break down a specific category or show more details?"
+        )
+        return "\n".join(lines)
+
     # ---------------------------------------------------------
     # TTS Methods
     # ---------------------------------------------------------
@@ -244,6 +354,16 @@ class SOA1Agent:
         except Exception as e:
             logger.error(f"Model call failed: {e}")
             raise ServiceError("model", f"Model inference failed: {str(e)}")
+
+        # 5. Check for [INVOKE:phinance] tag and handle specialist routing
+        if INVOKE_PATTERN.search(answer):
+            logger.info("Detected [INVOKE:phinance] signal - routing to phinance")
+            answer_without_tag = INVOKE_PATTERN.sub("", answer).strip()
+            phinance_result = self._invoke_phinance(document_context)
+            if answer_without_tag:
+                answer = f"{answer_without_tag}\n\n{phinance_result}"
+            else:
+                answer = phinance_result
 
         # 5. Write new factual memory (with explicit time)
         try:

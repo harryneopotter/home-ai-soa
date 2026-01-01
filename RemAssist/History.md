@@ -2,6 +2,58 @@
 
 ## 📅 Session History
 
+### January 1, 2026 - Upload Response Architecture Fix (Session 15)
+
+#### 📄 Documentation Created
+- **New Document:** `RemAssist/LLM_DRIVEN_RESPONSES.md` — Comprehensive explanation of the LLM-driven response principle, the bug chain, fix implementation plan, and verification checklist
+
+#### 🐛 Problem Identified
+- **Issue**: Upload response returning hardcoded "Analysis ready." instead of LLM-generated contextual response
+- **Root Cause**: When `consent_request` was removed from API response (Session 14 fix), frontend fell back to hardcoded string in `index.html` line 287
+
+#### 🏗️ Architectural Decision
+**Route upload response through LLM instead of hardcoded frontend strings.**
+
+**Rationale:**
+- Single round trip (lower latency)
+- Frontend stays dumb, backend handles orchestration
+- Document context already available in API
+- Works automatically for future clients (mobile, CLI)
+- Atomic operation (upload + response)
+
+#### 🛠️ Implementation Completed
+1. **Modified `/upload-pdf`** in `home-ai/soa1/api.py`:
+   - After successful upload, calls `SOA1Agent.ask()` with document context
+   - Includes filename, pages, size, detected type, preview text
+   - Returns `agent_response` field with LLM-generated text
+   
+2. **Updated frontend** in `soa-webui/templates/index.html`:
+   - Changed line 287 to use `data.agent_response || \`Received: \${file.name}\``
+   - Removed hardcoded "Analysis ready." fallback
+
+#### ✅ Verified Result
+```json
+{
+  "status": "UPLOADED",
+  "doc_id": "finance-20260101-195110-e96226",
+  "filename": "Apple Card Statement - April 2025.pdf",
+  "pages": 6,
+  "agent_response": "I've received **Apple Card Statement - April 2025.pdf**.\n\nFrom the first page, I can see:\n- A minimum payment of **$25.00**...\n\nYou can:\n• Ask me a specific question about this statement\n• Get a quick summary...\n\nNothing happens unless you say so."
+}
+```
+
+#### 📝 Files Modified
+- `home-ai/soa1/api.py` - Added agent call after upload with document context
+- `soa-webui/templates/index.html` - Display agent_response directly
+- `RemAssist/LLM_DRIVEN_RESPONSES.md` - NEW architectural document
+- `AGENTS.md` - Added LLM-Driven Responses as constitutional document
+- `home-ai/ARCHITECTURE.md` - Added 6th design principle
+
+#### 📚 Reference
+See `RemAssist/LLM_DRIVEN_RESPONSES.md` for full architectural explanation.
+
+---
+
 ### January 1, 2026 - MVP Demo UI Enhancements (Session 14)
 
 #### 🎯 Cross-Document Comparison UI
