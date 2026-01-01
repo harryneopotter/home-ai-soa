@@ -2,6 +2,42 @@
 
 ## 📅 Session History
 
+### December 31, 2025 - Security Hardening & UI Enhancements (Session 11)
+
+#### 🔧 Retry Logic Wired into call_phinance()
+- **File Modified:** `home-ai/soa1/models.py`
+  - Added `retry_config: Optional[RetryConfig] = None` parameter to `call_phinance()`
+  - Implemented retry loop with validation feedback when `retry_config` is provided
+  - On validation failure, builds retry prompt with error feedback using `build_retry_prompt()`
+  - Logs retry attempts with warning level
+  - `call_phinance_validated()` now uses retry by default (max_attempts=3)
+- **File Modified:** `home-ai/soa1/utils/__init__.py`
+  - Added exports: `RetryConfig`, `RetryContext`, `build_retry_prompt`
+
+#### 🛡️ Security Fixes - XSS & Path Traversal
+- **XSS Fixes in Templates:**
+  - `soa-webui/templates/consolidated_dashboard.html`: Added `escapeHtml()` function for safe HTML rendering, applied to merchant names, categories, dates, insights, recommendations, doc_ids
+  - `soa-webui/templates/analysis_dashboard.html`: Same `escapeHtml()` function applied to transactions table and insights
+- **Path Traversal Fixes:**
+  - `home-ai/soa1/api.py`: PDF upload filename sanitization with `re.sub(r'[^\w\-_\.]', '_', os.path.basename(filename))`
+  - `home-ai/soa1/api.py`: Audio endpoint with `os.path.basename()` check and `".."` rejection
+
+#### 🎨 UI Enhancements - Date Range Picker & CSV Export
+- **File Modified:** `soa-webui/templates/consolidated_dashboard.html`
+  - Added CSS for date inputs and export button (dark theme styling)
+  - Added date range picker inputs (`dateFrom`, `dateTo`) to filter bar
+  - Added "Export CSV" button with green accent styling
+  - Implemented `parseDate()` to handle MM/DD/YYYY and YYYY-MM-DD formats
+  - Updated `filterTransactions()` to filter by date range
+  - Added `currentFilteredTransactions` to track filtered results
+  - Implemented `exportToCSV()`: generates CSV with proper escaping, downloads as `transactions_YYYY-MM-DD.csv`
+
+#### 📝 Git Commit
+- Commit `335486a`: "feat: security hardening + retry wiring + UI enhancements"
+- Pushed to `origin/main`
+
+---
+
 ### December 31, 2025 - LLM Response Validation & Consolidated Dashboard (Session 10)
 
 #### 🛡️ LLM Response Validation System

@@ -1,7 +1,7 @@
 # 📋 RemAssist — Unified Task Queue
 *Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-_Last updated: December 31, 2025 (Session 10)_
+_Last updated: December 31, 2025 (Session 11)_
 
 ---
 
@@ -12,7 +12,9 @@ _Last updated: December 31, 2025 (Session 10)_
 - ✅ Performance: 8 PDFs in 84s (~10.5s avg), 437 transactions extracted
 - ✅ **Consolidated Dashboard**: `/dashboard/consolidated` with charts, tables, filtering
 - ✅ **LLM Response Validation**: Pydantic schemas for phinance output validation
-- ✅ **Retry Infrastructure**: Base setup ready (not wired yet)
+- ✅ **Retry Logic Wired**: `call_phinance()` now retries with validation feedback (max 3 attempts)
+- ✅ **Security Hardened**: XSS fixes (escapeHtml), path traversal protection
+- ✅ **UI Enhanced**: Date range picker, CSV export for transactions
 - ✅ Consent endpoint registered at `/api/consent`
 - ✅ Phinance model calls now logged to `logs/model_calls.jsonl`
 - ✅ Monitoring Dashboard: `/monitoring` endpoint with system stats, services, GPUs, logs, jobs
@@ -46,11 +48,11 @@ _Last updated: December 31, 2025 (Session 10)_
 - [x] Add insights and recommendations display
 - [x] Test with 8 PDFs batch
 
-### 1. Wire Retry Logic (When Needed)
-- [ ] Integrate retry loop into `call_phinance()` using `build_retry_prompt()`
-- [ ] Add configurable max_attempts (default: 3)
-- [ ] Log retry attempts with validation errors
-- [ ] Add metrics for retry success rate
+### 1. Wire Retry Logic ✅ COMPLETED (Dec 31, 2025)
+- [x] Integrate retry loop into `call_phinance()` using `build_retry_prompt()`
+- [x] Add configurable max_attempts (default: 3)
+- [x] Log retry attempts with validation errors
+- [ ] Add metrics for retry success rate (deferred - needs monitoring integration)
 
 ### 1.1 Keep-Alive & Ollama API Standardization
 - [x] `home-ai/soa1/models.py` - uses `/api/chat` with `keep_alive: -1` ✅
@@ -58,16 +60,17 @@ _Last updated: December 31, 2025 (Session 10)_
 - [ ] Add unit/integration test verifying models are pinned (`ollama ps` shows `UNTIL: Forever`)
 - [ ] Add linter/CI check for `/v1` endpoints where `keep_alive` is required
 
-### 2. Input Validation & Sanitization
-- [ ] Audit XSS vulnerabilities in dashboard templates (merchant names, categories)
-- [ ] Add path traversal protection for PDF uploads
-- [ ] Verify Jinja2 autoescape is enabled
-- [ ] Add input length limits to all API endpoints
+### 2. Input Validation & Sanitization ✅ COMPLETED (Dec 31, 2025)
+- [x] Audit XSS vulnerabilities in dashboard templates (merchant names, categories)
+- [x] Add path traversal protection for PDF uploads
+- [x] Verify Jinja2 autoescape is enabled (client-side JS needed escapeHtml())
+- [ ] Add input length limits to all API endpoints (deferred)
 
-### 3. UI Enhancements
+### 3. UI Enhancements ✅ COMPLETED (Dec 31, 2025)
 - [x] Consolidated dashboard with charts ✅
-- [ ] Add date range picker to consolidated dashboard
-- [ ] Add export to CSV/PDF functionality
+- [x] Add date range picker to consolidated dashboard
+- [x] Add export to CSV functionality
+- [ ] Add export to PDF functionality (needs jsPDF library)
 - [ ] Add spending alerts/thresholds
 - [ ] Mobile responsive improvements
 
@@ -99,9 +102,11 @@ _Last updated: December 31, 2025 (Session 10)_
 
 ---
 
-## 🏁 Recently Completed (Dec 31, 2025 - Sessions 9 & 10)
+## 🏁 Recently Completed (Dec 31, 2025 - Sessions 9, 10 & 11)
+- **Security Hardening**: XSS fixes with escapeHtml(), path traversal protection
+- **Retry Logic Wired**: call_phinance() now retries with validation feedback
+- **UI Enhanced**: Date range picker, CSV export for transactions
 - **GPU Eviction Fix**: Models now stay at 100% GPU throughout analysis
 - **Consolidated Dashboard**: Full dashboard with charts, tables, AI insights
 - **LLM Response Validation**: Pydantic schemas catch malformed LLM responses
-- **Retry Infrastructure**: Base setup ready for when failures occur
 - **Batch Testing**: 8 PDFs, 437 transactions, 84s total - all validated
