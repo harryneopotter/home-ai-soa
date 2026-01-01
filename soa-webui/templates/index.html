@@ -76,8 +76,8 @@
             color: #000;
         }
         .brutal-btn:disabled {
-            border-color: #333;
-            color: #333;
+            border-color: #444;
+            color: #555;
             cursor: not-allowed;
             background: transparent;
         }
@@ -125,8 +125,33 @@
         }
     </style>
 </head>
-<body class="bg-bg-brutal-dark text-text-brutal-light font-mono min-h-screen py-8 px-4 sm:px-6 lg:px-8">
-    <div class="w-full max-w-6xl mx-auto">
+<body class="bg-bg-brutal-dark text-text-brutal-light font-mono min-h-screen">
+    <!-- Status Bar -->
+    <div id="statusBar" class="w-full bg-black border-b border-gray-900 py-2 px-4">
+        <div class="max-w-6xl mx-auto flex items-center justify-between">
+            <div class="flex items-center space-x-6 text-[9px] uppercase tracking-wider">
+                <div class="flex items-center space-x-2">
+                    <span id="webuiStatus" class="w-2 h-2 rounded-full bg-accent-neon-orange animate-pulse"></span>
+                    <span class="text-gray-500">WebUI</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span id="apiStatus" class="w-2 h-2 rounded-full bg-accent-neon-orange animate-pulse"></span>
+                    <span class="text-gray-500">SOA1 API</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span id="ollamaStatus" class="w-2 h-2 rounded-full bg-accent-neon-orange animate-pulse"></span>
+                    <span class="text-gray-500">Ollama</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span id="modelsStatus" class="w-2 h-2 rounded-full bg-accent-neon-orange animate-pulse"></span>
+                    <span class="text-gray-500">Models</span>
+                </div>
+            </div>
+            <div id="statusMessage" class="text-[9px] text-gray-600 uppercase tracking-wider"></div>
+        </div>
+    </div>
+
+    <div class="w-full max-w-6xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
         <!-- Header -->
         <div class="mb-8 flex justify-between items-end">
             <div class="flex items-start space-x-4">
@@ -155,10 +180,10 @@
                         <h2 class="brutal-heading text-sm">DOCUMENTS</h2>
                     </div>
                     
-                    <div id="uploadArea" class="border border-dashed border-gray-800 p-6 text-center hover:border-accent-neon-orange transition-colors cursor-pointer relative mb-4">
-                        <input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept=".pdf" onchange="handleFileSelect(this)">
-                        <span class="material-symbols-outlined text-3xl text-gray-800 mb-2">add_circle</span>
-                        <div class="text-[10px] text-gray-500 uppercase tracking-tighter">DROP PDF OR CLICK</div>
+                    <div id="uploadArea" class="border border-dashed border-gray-500 p-6 text-center hover:border-accent-neon-orange transition-colors cursor-pointer relative mb-4">
+                        <input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept=".pdf" multiple onchange="handleFileSelect(this)">
+                        <span class="material-symbols-outlined text-3xl text-gray-400 mb-2">add_circle</span>
+                        <div class="text-[10px] text-gray-500 uppercase tracking-tighter">DROP PDFs OR CLICK</div>
                         <div id="fileName" class="text-accent-neon-orange mt-2 text-[10px] font-bold truncate hidden"></div>
                     </div>
 
@@ -170,7 +195,7 @@
                 </div>
 
                 <div class="mt-auto pt-10">
-                    <div class="brutal-subtext text-[9px] uppercase opacity-30 leading-relaxed">
+                    <div class="brutal-subtext text-[9px] uppercase opacity-70 leading-relaxed">
                         Notice: This system is strictly local.<br>
                         Data persistence is encrypted.<br>
                         No telemetry is transmitted.
@@ -182,9 +207,9 @@
             <div class="lg:col-span-3">
                 <div class="brutal-block h-full flex flex-col mb-0 pb-4">
                     <div id="chatHistory" class="chat-container flex-grow mb-4 bg-black border-none">
-                        <div class="flex flex-col items-center justify-center h-full opacity-20">
-                            <span class="material-symbols-outlined text-6xl mb-4">fingerprint</span>
-                            <div class="text-[10px] tracking-[0.3em] uppercase">Identity Verified. Ready.</div>
+                        <div class="flex flex-col items-center justify-center h-full opacity-10">
+                            <span class="material-symbols-outlined text-5xl mb-4">fingerprint</span>
+                            <div class="text-[10px] tracking-[0.3em] uppercase">READY FOR INPUT</div>
                         </div>
                     </div>
 
@@ -205,13 +230,19 @@
             const fileNameDisplay = document.getElementById('fileName');
             const uploadBtn = document.getElementById('uploadBtn');
             
-            if (input.files && input.files[0]) {
-                fileNameDisplay.textContent = input.files[0].name;
+            if (input.files && input.files.length > 0) {
+                if (input.files.length === 1) {
+                    fileNameDisplay.textContent = input.files[0].name;
+                } else {
+                    fileNameDisplay.textContent = `${input.files.length} files selected`;
+                }
                 fileNameDisplay.classList.remove('hidden');
                 uploadBtn.disabled = false;
+                uploadBtn.textContent = input.files.length > 1 ? 'PROCESS FILES' : 'PROCESS FILE';
             } else {
                 fileNameDisplay.classList.add('hidden');
                 uploadBtn.disabled = true;
+                uploadBtn.textContent = 'PROCESS FILE';
             }
         }
 
@@ -220,45 +251,59 @@
             const btn = document.getElementById('uploadBtn');
             const status = document.getElementById('uploadStatus');
             
-            if (!input.files[0]) return;
+            if (!input.files || input.files.length === 0) return;
 
-            const formData = new FormData();
-            formData.append('file', input.files[0]);
+            const files = Array.from(input.files);
+            const totalFiles = files.length;
+            let successCount = 0;
+            let errorCount = 0;
 
             btn.disabled = true;
             btn.textContent = 'TRANSMITTING...';
-            status.textContent = 'UPLOADING DATA PACKET...';
             status.className = 'mt-4 text-[10px] p-2 border border-accent-neon-orange text-accent-neon-orange';
             status.classList.remove('hidden');
 
-            try {
-                const response = await fetch('/api/proxy/upload', {
-                    method: 'POST',
-                    body: formData
-                });
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                status.textContent = `UPLOADING ${i + 1}/${totalFiles}: ${file.name}...`;
 
-                const data = await response.json();
-                
-                if (response.ok) {
-                    status.textContent = 'DATA RECEIVED. JOB: ' + (data.job_id || 'OK');
-                    status.className = 'mt-4 text-[10px] p-2 border border-accent-green text-accent-green';
+                const formData = new FormData();
+                formData.append('file', file);
+
+                try {
+                    const response = await fetch('/api/proxy/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await response.json();
                     
-                    const msg = `Received: ${input.files[0].name}. ${data.consent_request ? data.consent_request.message : 'Analysis ready.'}`;
-                    appendMessage('agent', msg);
-                    
-                    // Reset
-                    input.value = '';
-                    document.getElementById('fileName').classList.add('hidden');
-                    btn.textContent = 'PROCESS FILE';
-                } else {
-                    throw new Error(data.message || 'Transmission error');
+                    if (response.ok) {
+                        successCount++;
+                        const msg = `Received: ${file.name}. ${data.consent_request ? data.consent_request.message : 'Analysis ready.'}`;
+                        appendMessage('agent', msg);
+                    } else {
+                        errorCount++;
+                        appendMessage('agent', `Error uploading ${file.name}: ${data.message || 'Unknown error'}`);
+                    }
+                } catch (e) {
+                    errorCount++;
+                    appendMessage('agent', `Failed to upload ${file.name}: ${e.message}`);
                 }
-            } catch (e) {
-                status.textContent = 'ERROR: ' + e.message;
-                status.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
-                btn.textContent = 'RETRY';
-                btn.disabled = false;
             }
+
+            if (errorCount === 0) {
+                status.textContent = `SUCCESS: ${successCount} file(s) uploaded`;
+                status.className = 'mt-4 text-[10px] p-2 border border-accent-green text-accent-green';
+            } else {
+                status.textContent = `DONE: ${successCount} success, ${errorCount} failed`;
+                status.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
+            }
+
+            input.value = '';
+            document.getElementById('fileName').classList.add('hidden');
+            btn.disabled = true;
+            btn.textContent = 'PROCESS FILE';
         }
 
         function handleEnter(e) {
@@ -335,6 +380,55 @@
             history.appendChild(div);
             history.scrollTop = history.scrollHeight;
         }
+
+        function updateStatus(service, status) {
+            const el = document.getElementById(service + 'Status');
+            if (!el) return;
+            el.className = 'w-2 h-2 rounded-full ' + 
+                (status === 'online' ? 'bg-accent-green' : 
+                 status === 'offline' ? 'bg-accent-red' : 
+                 'bg-accent-neon-orange animate-pulse');
+        }
+
+        function setStatusMessage(msg) {
+            const el = document.getElementById('statusMessage');
+            if (el) el.textContent = msg;
+        }
+
+        async function checkServiceStatus() {
+            setStatusMessage('CHECKING...');
+            
+            updateStatus('webui', 'checking');
+            updateStatus('api', 'checking');
+            updateStatus('ollama', 'checking');
+            updateStatus('models', 'checking');
+
+            try {
+                const r = await fetch('/api/status');
+                if (r.ok) {
+                    const data = await r.json();
+                    updateStatus('webui', data.webui?.status || 'offline');
+                    updateStatus('api', data.soa1_api?.status || 'offline');
+                    updateStatus('ollama', data.ollama?.status || 'offline');
+                    updateStatus('models', data.models?.status || 'offline');
+                } else {
+                    updateStatus('webui', 'online');
+                    updateStatus('api', 'offline');
+                    updateStatus('ollama', 'offline');
+                    updateStatus('models', 'offline');
+                }
+            } catch {
+                updateStatus('webui', 'offline');
+                updateStatus('api', 'offline');
+                updateStatus('ollama', 'offline');
+                updateStatus('models', 'offline');
+            }
+
+            setStatusMessage('');
+        }
+
+        checkServiceStatus();
+        setInterval(checkServiceStatus, 30000);
     </script>
 </body>
 </html>

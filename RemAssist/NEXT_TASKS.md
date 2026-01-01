@@ -1,7 +1,7 @@
 # 📋 RemAssist — Unified Task Queue
 *Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-_Last updated: December 31, 2025 (Session 13)_
+_Last updated: January 1, 2026 (Session 14)_
 
 ---
 

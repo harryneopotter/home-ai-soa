@@ -5,8 +5,21 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
 import os
+import sys
 
 router = APIRouter()
+
+SOA1_DIR = Path(__file__).resolve().parents[1] / "home-ai" / "soa1"
+if str(SOA1_DIR) not in sys.path:
+    sys.path.insert(0, str(SOA1_DIR))
+
+try:
+    from utils.merchant_normalizer import normalize_transactions
+
+    MERCHANT_NORMALIZER_AVAILABLE = True
+except ImportError:
+    MERCHANT_NORMALIZER_AVAILABLE = False
+    normalize_transactions = None
 
 # Determine reports directory (default to canonical finance-agent path)
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -30,6 +43,15 @@ def _load_json_if_exists(path: Path) -> Optional[Dict[str, Any]]:
     except Exception:
         pass
     return None
+
+
+def _aggregate_merchants(transactions: List[Dict]) -> Dict[str, float]:
+    totals: Dict[str, float] = {}
+    for tx in transactions:
+        merchant = tx.get("merchant", "Unknown")
+        amt = float(tx.get("amount", 0) or 0)
+        totals[merchant] = totals.get(merchant, 0) + amt
+    return totals
 
 
 def seed_analysis_jobs_from_reports(
@@ -406,6 +428,17 @@ async def api_consolidated_reports():
     for a in all_analyses:
         all_insights.extend(a.get("insights", []))
         all_recommendations.extend(a.get("recommendations", []))
+
+    if MERCHANT_NORMALIZER_AVAILABLE and normalize_transactions:
+        normalize_transactions(all_transactions)
+        top_merchants = sorted(
+            [
+                {"name": k, "total": round(v, 2)}
+                for k, v in _aggregate_merchants(all_transactions).items()
+            ],
+            key=lambda x: x["total"],
+            reverse=True,
+        )[:15]
 
     return {
         "consolidated": True,

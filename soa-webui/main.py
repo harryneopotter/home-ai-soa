@@ -455,6 +455,51 @@ def health():
     }
 
 
+@app.get("/api/status")
+def api_status():
+    """Comprehensive status check for all services"""
+    import subprocess
+
+    status = {
+        "webui": {"status": "online"},
+        "soa1_api": {"status": "offline"},
+        "ollama": {"status": "offline"},
+        "models": {"status": "offline", "loaded": []},
+    }
+
+    try:
+        r = requests.get("http://localhost:8001/health", timeout=2)
+        status["soa1_api"]["status"] = "online" if r.ok else "offline"
+    except:
+        pass
+
+    try:
+        r = requests.get("http://localhost:11434/api/tags", timeout=2)
+        if r.ok:
+            status["ollama"]["status"] = "online"
+    except:
+        pass
+
+    try:
+        result = subprocess.run(
+            ["ollama", "ps"], capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            lines = result.stdout.strip().split("\n")[1:]
+            loaded = []
+            for line in lines:
+                if line.strip():
+                    parts = line.split()
+                    if parts:
+                        loaded.append(parts[0])
+            status["models"]["loaded"] = loaded
+            status["models"]["status"] = "online" if loaded else "offline"
+    except:
+        pass
+
+    return status
+
+
 # =============================================================================
 # Finance Analysis Endpoints
 # =============================================================================

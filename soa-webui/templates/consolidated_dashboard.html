@@ -343,7 +343,22 @@
 
                 <div id="documents" class="page-content">
                     <h2 style="margin-bottom: 20px; color: #fff;">Analyzed Documents</h2>
+                    <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
+                        <button id="compareBtn" onclick="compareSelected()" disabled style="padding: 10px 20px; background: rgba(59,130,246,0.2); border: 1px solid #3B82F6; border-radius: 8px; color: #60A5FA; cursor: pointer; opacity: 0.5;">
+                            📊 Compare Selected (0)
+                        </button>
+                        <button onclick="selectAllDocs()" style="padding: 10px 15px; background: rgba(30,41,59,0.8); border: 1px solid rgba(96,165,250,0.3); border-radius: 8px; color: #94A3B8; cursor: pointer;">
+                            Select All
+                        </button>
+                        <button onclick="clearSelection()" style="padding: 10px 15px; background: rgba(30,41,59,0.8); border: 1px solid rgba(96,165,250,0.3); border-radius: 8px; color: #94A3B8; cursor: pointer;">
+                            Clear
+                        </button>
+                    </div>
                     <div id="documentsContainer"></div>
+                    <div id="comparisonResults" style="display: none; margin-top: 30px;">
+                        <h3 style="color: #10B981; margin-bottom: 15px;">📊 Comparison Results</h3>
+                        <div id="comparisonContent"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -635,16 +650,22 @@
                 : '<div class="recommendation-box">No recommendations available.</div>';
         }
 
+        let selectedDocs = new Set();
+
         function renderDocuments() {
             const docs = reportData.document_summaries || [];
             document.getElementById('documentsContainer').innerHTML = docs.map(d => `
-                <div class="doc-card">
+                <div class="doc-card" style="cursor: pointer;" onclick="toggleDocSelection('${escapeHtml(d.doc_id)}', event)">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <div style="color: #fff; font-weight: 600;">${escapeHtml(d.doc_id)}</div>
-                            <div style="color: #6B7280; font-size: 0.85rem;">
-                                ${d.transaction_count || 0} transactions | 
-                                ${escapeHtml(d.date_range?.start || 'N/A')} - ${escapeHtml(d.date_range?.end || 'N/A')}
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <input type="checkbox" id="doc-${escapeHtml(d.doc_id)}" ${selectedDocs.has(d.doc_id) ? 'checked' : ''} 
+                                   style="width: 18px; height: 18px; cursor: pointer;" onclick="event.stopPropagation(); toggleDocSelection('${escapeHtml(d.doc_id)}', event)">
+                            <div>
+                                <div style="color: #fff; font-weight: 600;">${escapeHtml(d.doc_id)}</div>
+                                <div style="color: #6B7280; font-size: 0.85rem;">
+                                    ${d.transaction_count || 0} transactions | 
+                                    ${escapeHtml(d.date_range?.start || 'N/A')} - ${escapeHtml(d.date_range?.end || 'N/A')}
+                                </div>
                             </div>
                         </div>
                         <div style="color: #EF4444; font-size: 1.2rem; font-weight: 700;">
@@ -653,6 +674,134 @@
                     </div>
                 </div>
             `).join('');
+            updateCompareButton();
+        }
+
+        function toggleDocSelection(docId, event) {
+            if (event) event.stopPropagation();
+            if (selectedDocs.has(docId)) {
+                selectedDocs.delete(docId);
+            } else {
+                selectedDocs.add(docId);
+            }
+            const checkbox = document.getElementById('doc-' + docId);
+            if (checkbox) checkbox.checked = selectedDocs.has(docId);
+            updateCompareButton();
+        }
+
+        function selectAllDocs() {
+            const docs = reportData.document_summaries || [];
+            docs.forEach(d => selectedDocs.add(d.doc_id));
+            renderDocuments();
+        }
+
+        function clearSelection() {
+            selectedDocs.clear();
+            renderDocuments();
+            document.getElementById('comparisonResults').style.display = 'none';
+        }
+
+        function updateCompareButton() {
+            const btn = document.getElementById('compareBtn');
+            const count = selectedDocs.size;
+            btn.textContent = `📊 Compare Selected (${count})`;
+            btn.disabled = count < 2;
+            btn.style.opacity = count < 2 ? '0.5' : '1';
+        }
+
+        async function compareSelected() {
+            if (selectedDocs.size < 2) {
+                alert('Please select at least 2 documents to compare');
+                return;
+            }
+            
+            const btn = document.getElementById('compareBtn');
+            btn.textContent = '⏳ Comparing...';
+            btn.disabled = true;
+            
+            try {
+                const resp = await fetch('/api/reports/compare', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(Array.from(selectedDocs))
+                });
+                
+                if (!resp.ok) throw new Error('Comparison failed');
+                const data = await resp.json();
+                renderComparison(data);
+            } catch (e) {
+                alert('Error: ' + e.message);
+            } finally {
+                updateCompareButton();
+            }
+        }
+
+        function renderComparison(data) {
+            const container = document.getElementById('comparisonContent');
+            const docs = data.compared_documents || [];
+            const totals = data.totals || {};
+            const categories = data.by_category || {};
+            const sharedMerchants = data.shared_merchants || [];
+            
+            let html = `
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                    ${docs.map(docId => {
+                        const t = totals[docId] || {};
+                        return `
+                            <div class="metric-card" style="border-left: 4px solid #3B82F6;">
+                                <div style="color: #94A3B8; font-size: 0.75rem; margin-bottom: 5px;">${escapeHtml(docId.substring(0, 25))}${docId.length > 25 ? '...' : ''}</div>
+                                <div style="color: #EF4444; font-size: 1.5rem; font-weight: 700;">$${(t.total_spent || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}</div>
+                                <div style="color: #6B7280; font-size: 0.85rem;">${t.transaction_count || 0} txns | Avg: $${(t.avg_transaction || 0).toFixed(2)}</div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                
+                <h4 style="color: #fff; margin-bottom: 15px;">Category Breakdown</h4>
+                <div style="overflow-x: auto; margin-bottom: 25px;">
+                    <table class="transactions-table">
+                        <thead>
+                            <tr>
+                                <th>Category</th>
+                                ${docs.map(d => `<th>${escapeHtml(d.substring(0, 15))}...</th>`).join('')}
+                                <th>Diff</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${Object.entries(categories).sort((a,b) => {
+                                const maxA = Math.max(...Object.values(a[1]));
+                                const maxB = Math.max(...Object.values(b[1]));
+                                return maxB - maxA;
+                            }).slice(0, 10).map(([cat, vals]) => {
+                                const amounts = docs.map(d => vals[d] || 0);
+                                const diff = amounts.length >= 2 ? (amounts[0] - amounts[1]) : 0;
+                                const diffColor = diff > 0 ? '#EF4444' : diff < 0 ? '#10B981' : '#6B7280';
+                                return `
+                                    <tr>
+                                        <td style="color: #fff;">${escapeHtml(cat)}</td>
+                                        ${amounts.map(a => `<td>$${a.toFixed(2)}</td>`).join('')}
+                                        <td style="color: ${diffColor}; font-weight: 600;">${diff >= 0 ? '+' : ''}$${diff.toFixed(2)}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                
+                ${sharedMerchants.length > 0 ? `
+                    <h4 style="color: #fff; margin-bottom: 10px;">Shared Merchants (${sharedMerchants.length})</h4>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        ${sharedMerchants.slice(0, 20).map(m => `
+                            <span style="background: rgba(16,185,129,0.2); color: #10B981; padding: 4px 10px; border-radius: 12px; font-size: 0.85rem;">${escapeHtml(m)}</span>
+                        `).join('')}
+                        ${sharedMerchants.length > 20 ? `<span style="color: #6B7280;">+${sharedMerchants.length - 20} more</span>` : ''}
+                    </div>
+                ` : ''}
+            `;
+            
+            container.innerHTML = html;
+            document.getElementById('comparisonResults').style.display = 'block';
+            document.getElementById('comparisonResults').scrollIntoView({ behavior: 'smooth' });
         }
 
         function showPage(pageId) {

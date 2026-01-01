@@ -2,6 +2,42 @@
 
 ## 📅 Session History
 
+### January 1, 2026 - MVP Demo UI Enhancements (Session 14)
+
+#### 🎯 Cross-Document Comparison UI
+- **File Modified:** `soa-webui/templates/consolidated_dashboard.html`
+  - Added checkboxes to Documents page for selecting docs to compare
+  - Added "Select All" / "Clear" / "Compare Selected (N)" buttons
+  - New comparison section showing side-by-side totals, category breakdown with diff column, shared merchants
+  - Leverages existing `/api/reports/compare` endpoint
+  - Smooth scroll to comparison results
+
+#### 🏷️ Merchant Normalization in Dashboard
+- **File Modified:** `soa-webui/reports.py`
+  - Integrated `normalize_transactions()` into `/api/reports/consolidated`
+  - Transactions now show clean merchant names (Amazon vs AMZN*MKTP)
+  - Raw merchant name preserved in `merchant_raw` field
+  - Added `_aggregate_merchants()` helper function
+  - Graceful degradation with `MERCHANT_NORMALIZER_AVAILABLE` flag
+
+#### 🎨 Chat UI Contrast Fixes
+- **File Modified:** `soa-webui/templates/index.html`
+  - Fixed disabled button contrast: `color: #333` → `#666`, `border-color: #333` → `#555`
+  - Fixed upload area border: `border-gray-800` → `border-gray-600`
+  - Fixed add icon visibility: `text-gray-800` → `text-gray-500`
+  - Fixed "DROP PDFs OR CLICK" text: `text-gray-500` → `text-gray-400`
+  - Fixed notice text opacity: `opacity-30` → `opacity-50`
+
+#### 📤 Multi-File PDF Upload
+- **File Modified:** `soa-webui/templates/index.html`
+  - Added `multiple` attribute to file input
+  - Shows "N files selected" when multiple files chosen
+  - Sequential upload with progress indicator ("UPLOADING 2/5: filename.pdf...")
+  - Final summary shows success/failure counts
+  - Button text changes to "PROCESS FILES" for multiple selections
+
+---
+
 ### December 31, 2025 - Chat History, Cross-Doc Compare, Merchant Normalization (Session 13)
 
 #### 💬 Chat History Persistence
