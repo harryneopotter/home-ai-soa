@@ -177,6 +177,31 @@
             outline: none; border-color: #3B82F6;
         }
 
+        .filter-bar input[type="date"] {
+            width: 140px;
+        }
+
+        .filter-bar input[type="date"]::-webkit-calendar-picker-indicator {
+            filter: invert(0.8);
+            cursor: pointer;
+        }
+
+        .export-btn {
+            background: rgba(16, 185, 129, 0.2);
+            border: 1px solid #10B981;
+            color: #10B981;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .export-btn:hover {
+            background: #10B981;
+            color: #0F1419;
+        }
+
         .doc-card {
             background: rgba(30, 41, 59, 0.5);
             border: 1px solid rgba(96,165,250,0.2);
@@ -262,12 +287,15 @@
                         <select id="categoryFilter" onchange="filterTransactions()">
                             <option value="">All Categories</option>
                         </select>
+                        <input type="date" id="dateFrom" onchange="filterTransactions()" title="From date">
+                        <input type="date" id="dateTo" onchange="filterTransactions()" title="To date">
                         <select id="sortOrder" onchange="filterTransactions()">
                             <option value="date-desc">Date (Newest)</option>
                             <option value="date-asc">Date (Oldest)</option>
                             <option value="amount-desc">Amount (High to Low)</option>
                             <option value="amount-asc">Amount (Low to High)</option>
                         </select>
+                        <button class="export-btn" onclick="exportToCSV()">📥 Export CSV</button>
                     </div>
                     <div style="overflow-x: auto;">
                         <table class="transactions-table">
@@ -311,6 +339,13 @@
     <script>
         let reportData = null;
         let allTransactions = [];
+
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            const div = document.createElement('div');
+            div.textContent = String(str);
+            return div.innerHTML;
+        }
 
         async function init() {
             try {
@@ -379,9 +414,9 @@
                 <div class="merchant-row">
                     <div>
                         <span style="color: #6B7280; margin-right: 10px;">#${i+1}</span>
-                        <span style="color: #fff;">${m.name.substring(0, 40)}${m.name.length > 40 ? '...' : ''}</span>
+                        <span style="color: #fff;">${escapeHtml((m.name || '').substring(0, 40))}${(m.name || '').length > 40 ? '...' : ''}</span>
                     </div>
-                    <span style="color: #EF4444; font-weight: 600;">$${m.total.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    <span style="color: #EF4444; font-weight: 600;">$${(m.total || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
                 </div>
             `).join('');
         }
@@ -420,15 +455,51 @@
             });
         }
 
+        let currentFilteredTransactions = [];
+
+        function parseDate(dateStr) {
+            if (!dateStr) return null;
+            const patterns = [
+                /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
+                /^(\d{4})-(\d{2})-(\d{2})$/
+            ];
+            for (const pattern of patterns) {
+                const match = dateStr.match(pattern);
+                if (match) {
+                    if (pattern === patterns[0]) {
+                        return new Date(match[3], match[1] - 1, match[2]);
+                    } else {
+                        return new Date(match[1], match[2] - 1, match[3]);
+                    }
+                }
+            }
+            return new Date(dateStr);
+        }
+
         function filterTransactions() {
             const search = document.getElementById('searchInput').value.toLowerCase();
             const category = document.getElementById('categoryFilter').value;
             const sort = document.getElementById('sortOrder').value;
+            const dateFrom = document.getElementById('dateFrom').value;
+            const dateTo = document.getElementById('dateTo').value;
+            
+            const fromDate = dateFrom ? new Date(dateFrom) : null;
+            const toDate = dateTo ? new Date(dateTo + 'T23:59:59') : null;
 
             let filtered = allTransactions.filter(t => {
                 const matchSearch = !search || (t.merchant || '').toLowerCase().includes(search);
                 const matchCat = !category || t.category === category;
-                return matchSearch && matchCat;
+                
+                let matchDate = true;
+                if (fromDate || toDate) {
+                    const txnDate = parseDate(t.date);
+                    if (txnDate) {
+                        if (fromDate && txnDate < fromDate) matchDate = false;
+                        if (toDate && txnDate > toDate) matchDate = false;
+                    }
+                }
+                
+                return matchSearch && matchCat && matchDate;
             });
 
             if (sort === 'date-desc') filtered.sort((a,b) => new Date(b.date) - new Date(a.date));
@@ -436,7 +507,41 @@
             else if (sort === 'amount-desc') filtered.sort((a,b) => Math.abs(b.amount) - Math.abs(a.amount));
             else if (sort === 'amount-asc') filtered.sort((a,b) => Math.abs(a.amount) - Math.abs(b.amount));
 
+            currentFilteredTransactions = filtered;
             renderTransactionTable(filtered);
+        }
+
+        function exportToCSV() {
+            const txns = currentFilteredTransactions.length > 0 ? currentFilteredTransactions : allTransactions;
+            if (txns.length === 0) {
+                alert('No transactions to export');
+                return;
+            }
+
+            const headers = ['Date', 'Merchant', 'Category', 'Amount', 'Source'];
+            const rows = txns.map(t => [
+                t.date || '',
+                (t.merchant || '').replace(/"/g, '""'),
+                t.category || '',
+                Math.abs(t.amount || 0).toFixed(2),
+                (t.source_doc || '').replace(/"/g, '""')
+            ]);
+
+            const csvContent = [
+                headers.join(','),
+                ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+            ].join('\n');
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            const today = new Date().toISOString().split('T')[0];
+            link.href = url;
+            link.download = `transactions_${today}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         }
 
         function renderTransactions() {
@@ -447,11 +552,11 @@
             const tbody = document.getElementById('txnBody');
             tbody.innerHTML = txns.slice(0, 500).map(t => `
                 <tr>
-                    <td>${t.date || 'N/A'}</td>
-                    <td style="color: #fff; font-weight: 500;">${(t.merchant || 'Unknown').substring(0, 50)}</td>
-                    <td><span style="background:rgba(59,130,246,0.2); color:#60A5FA; padding:2px 8px; border-radius:10px; font-size:0.8rem">${t.category || 'other'}</span></td>
+                    <td>${escapeHtml(t.date || 'N/A')}</td>
+                    <td style="color: #fff; font-weight: 500;">${escapeHtml((t.merchant || 'Unknown').substring(0, 50))}</td>
+                    <td><span style="background:rgba(59,130,246,0.2); color:#60A5FA; padding:2px 8px; border-radius:10px; font-size:0.8rem">${escapeHtml(t.category || 'other')}</span></td>
                     <td style="color: #EF4444;">$${Math.abs(t.amount || 0).toFixed(2)}</td>
-                    <td style="color: #6B7280; font-size: 0.8rem;">${(t.source_doc || '').substring(0, 20)}</td>
+                    <td style="color: #6B7280; font-size: 0.8rem;">${escapeHtml((t.source_doc || '').substring(0, 20))}</td>
                 </tr>
             `).join('');
             document.getElementById('txnCount').textContent = `Showing ${Math.min(txns.length, 500)} of ${txns.length} transactions`;
@@ -462,11 +567,11 @@
             const recommendations = reportData.recommendations || [];
 
             document.getElementById('insightsContainer').innerHTML = insights.length > 0
-                ? insights.map(i => `<div class="insight-box"><p>${i}</p></div>`).join('')
+                ? insights.map(i => `<div class="insight-box"><p>${escapeHtml(i)}</p></div>`).join('')
                 : '<div class="insight-box">No insights available.</div>';
 
             document.getElementById('recommendationsContainer').innerHTML = recommendations.length > 0
-                ? recommendations.map(r => `<div class="recommendation-box"><p>${r}</p></div>`).join('')
+                ? recommendations.map(r => `<div class="recommendation-box"><p>${escapeHtml(r)}</p></div>`).join('')
                 : '<div class="recommendation-box">No recommendations available.</div>';
         }
 
@@ -476,10 +581,10 @@
                 <div class="doc-card">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
-                            <div style="color: #fff; font-weight: 600;">${d.doc_id}</div>
+                            <div style="color: #fff; font-weight: 600;">${escapeHtml(d.doc_id)}</div>
                             <div style="color: #6B7280; font-size: 0.85rem;">
-                                ${d.transaction_count} transactions | 
-                                ${d.date_range?.start || 'N/A'} - ${d.date_range?.end || 'N/A'}
+                                ${d.transaction_count || 0} transactions | 
+                                ${escapeHtml(d.date_range?.start || 'N/A')} - ${escapeHtml(d.date_range?.end || 'N/A')}
                             </div>
                         </div>
                         <div style="color: #EF4444; font-size: 1.2rem; font-weight: 700;">

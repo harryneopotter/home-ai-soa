@@ -301,7 +301,6 @@ def create_app() -> FastAPI:
         client_ip = request.client.host
 
         try:
-            # Validate filename
             if not audio_file or not isinstance(audio_file, str):
                 raise ValidationError(
                     "Invalid audio file name", "audio_file", audio_file
@@ -312,7 +311,13 @@ def create_app() -> FastAPI:
                     "Only WAV files are supported", "audio_file", audio_file
                 )
 
-            audio_path = os.path.join("/tmp/soa1_tts", audio_file)
+            safe_filename = os.path.basename(audio_file)
+            if safe_filename != audio_file or ".." in audio_file:
+                raise ValidationError(
+                    "Invalid audio file path", "audio_file", audio_file
+                )
+
+            audio_path = os.path.join("/tmp/soa1_tts", safe_filename)
 
             if not os.path.exists(audio_path):
                 logger.warning(f"[{client_ip}] Audio file not found: {audio_file}")
@@ -322,7 +327,7 @@ def create_app() -> FastAPI:
             return Response(
                 content=open(audio_path, "rb").read(),
                 media_type="audio/wav",
-                headers={"Content-Disposition": f"inline; filename={audio_file}"},
+                headers={"Content-Disposition": f"inline; filename={safe_filename}"},
             )
 
         except ValidationError:
@@ -381,7 +386,16 @@ def create_app() -> FastAPI:
 
             # Create a finance-style doc_id matching the web UI convention
             doc_id = f"finance-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
-            dest_path = webui_upload_dir / f"{doc_id}_{file.filename}"
+
+            # Sanitize filename to prevent path traversal
+            import re
+
+            safe_filename = re.sub(
+                r"[^\w\-_\.]", "_", os.path.basename(file.filename or "upload.pdf")
+            )
+            if not safe_filename.lower().endswith(".pdf"):
+                safe_filename += ".pdf"
+            dest_path = webui_upload_dir / f"{doc_id}_{safe_filename}"
 
             # Read the uploaded file content and write to the destination
             try:

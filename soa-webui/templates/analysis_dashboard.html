@@ -213,6 +213,13 @@
         let transactions = [];
         let analysis = {};
 
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            const div = document.createElement('div');
+            div.textContent = String(str);
+            return div.innerHTML;
+        }
+
         async function init() {
             try {
                 // Fetch Data
@@ -286,9 +293,9 @@
             const tbody = document.getElementById('txnBody');
             tbody.innerHTML = transactions.map(t => `
                 <tr>
-                    <td>${t.date}</td>
-                    <td style="color: #fff; font-weight: 500;">${t.merchant}</td>
-                    <td><span style="background:rgba(59,130,246,0.2); color:#60A5FA; padding:2px 8px; border-radius:10px; font-size:0.8rem">${t.category}</span></td>
+                    <td>${escapeHtml(t.date)}</td>
+                    <td style="color: #fff; font-weight: 500;">${escapeHtml(t.merchant)}</td>
+                    <td><span style="background:rgba(59,130,246,0.2); color:#60A5FA; padding:2px 8px; border-radius:10px; font-size:0.8rem">${escapeHtml(t.category)}</span></td>
                     <td style="color: #EF4444;">$${Math.abs(t.amount).toFixed(2)}</td>
                 </tr>
             `).join('');
@@ -296,14 +303,12 @@
 
         function renderInsights() {
             const container = document.getElementById('insightsContainer');
-            // Try to parse phinance insights from analysis.json if structured
-            // Or fallback to displaying the raw insights string
             let content = '';
             
             if (analysis.insights && Array.isArray(analysis.insights)) {
-                content = analysis.insights.map(i => `<div class="insight-box"><p>${i}</p></div>`).join('');
+                content = analysis.insights.map(i => `<div class="insight-box"><p>${escapeHtml(i)}</p></div>`).join('');
             } else if (typeof analysis.insights === 'string') {
-                content = `<div class="insight-box"><p>${analysis.insights}</p></div>`;
+                content = `<div class="insight-box"><p>${escapeHtml(analysis.insights)}</p></div>`;
             } else {
                 content = '<div class="insight-box">No AI insights generated for this document yet.</div>';
             }

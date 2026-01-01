@@ -18,6 +18,9 @@ from utils.llm_validation import (
     validate_analysis,
     TransactionsResponse,
     AnalysisResponse,
+    RetryConfig,
+    RetryContext,
+    build_retry_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,12 +93,17 @@ def call_nemotron(prompt: str) -> str:
     return _dispatch_request(endpoint, payload)
 
 
-def call_phinance(payload_json: str, validate: bool = False) -> str:
+def call_phinance(
+    payload_json: str,
+    validate: bool = False,
+    retry_config: Optional[RetryConfig] = None,
+) -> str:
     """Send structured JSON (USD) payload to Phinance for finance analysis.
 
     Args:
         payload_json: JSON string with transaction data
         validate: If True, validates response schema (raises LLMValidationError on failure)
+        retry_config: If provided, enables retry with feedback on validation failure
 
     Returns:
         Raw LLM response string (caller should validate if needed)
@@ -113,25 +121,72 @@ def call_phinance(payload_json: str, validate: bool = False) -> str:
     sanitized = json.dumps(payload_dict)
 
     endpoint = _ENDPOINTS["phinance"]
-    prompt = f"Analyze the following finance payload in USD. Respond with structured JSON.\n{sanitized}"
-    model_payload = _build_chat_payload(endpoint, prompt)
-    response = _dispatch_request(endpoint, model_payload)
+    base_prompt = f"Analyze the following finance payload in USD. Respond with structured JSON.\n{sanitized}"
 
-    if validate:
-        validate_phinance_response(response)
+    # If no retry config, single attempt
+    if retry_config is None:
+        model_payload = _build_chat_payload(endpoint, base_prompt)
+        response = _dispatch_request(endpoint, model_payload)
+        if validate:
+            validate_phinance_response(response)
+        return response
 
-    return response
+    # Retry loop with validation feedback
+    last_error: Optional[LLMValidationError] = None
+    last_response: Optional[str] = None
+
+    for attempt in range(1, retry_config.max_attempts + 1):
+        # Build prompt (with feedback on retry)
+        if attempt == 1:
+            prompt = base_prompt
+        else:
+            context = RetryContext(
+                attempt=attempt,
+                previous_response=last_response
+                if retry_config.include_previous_response
+                else None,
+                previous_errors=last_error.errors if last_error else [],
+                feedback_prompt=last_error.feedback_prompt if last_error else None,
+            )
+            prompt = build_retry_prompt(base_prompt, context, retry_config)
+
+        model_payload = _build_chat_payload(endpoint, prompt)
+        response = _dispatch_request(endpoint, model_payload)
+        last_response = response
+
+        # Validate if requested
+        if not validate:
+            return response
+
+        try:
+            validate_phinance_response(response)
+            logger.info(f"Phinance validation passed on attempt {attempt}")
+            return response
+        except LLMValidationError as e:
+            last_error = e
+            logger.warning(
+                f"Phinance validation failed on attempt {attempt}/{retry_config.max_attempts}: {e.errors[:2]}"
+            )
+            if attempt == retry_config.max_attempts:
+                raise
+
+    # Should not reach here, but safety fallback
+    raise last_error or RuntimeError("Retry loop exited unexpectedly")
 
 
 def call_phinance_validated(
     payload_json: str,
+    retry_config: Optional[RetryConfig] = None,
 ) -> Tuple[TransactionsResponse, AnalysisResponse]:
     """Send payload to Phinance and return validated, typed response objects.
 
     This is the preferred method when you need structured data.
     Raises LLMValidationError if response doesn't match expected schema.
     """
-    raw_response = call_phinance(payload_json, validate=False)
+    if retry_config is None:
+        retry_config = RetryConfig(max_attempts=3)
+
+    raw_response = call_phinance(payload_json, validate=True, retry_config=retry_config)
 
     try:
         transactions, txn_warnings = validate_transactions(raw_response)
@@ -140,13 +195,9 @@ def call_phinance_validated(
     except LLMValidationError:
         transactions = TransactionsResponse(transactions=[])
 
-    try:
-        analysis, analysis_warnings = validate_analysis(raw_response)
-        if analysis_warnings:
-            logger.warning(f"Analysis validation warnings: {analysis_warnings}")
-    except LLMValidationError as e:
-        logger.error(f"Analysis validation failed: {e}")
-        raise
+    analysis, analysis_warnings = validate_analysis(raw_response)
+    if analysis_warnings:
+        logger.warning(f"Analysis validation warnings: {analysis_warnings}")
 
     return transactions, analysis
 
