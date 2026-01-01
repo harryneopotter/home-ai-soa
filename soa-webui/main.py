@@ -460,9 +460,13 @@ def health():
 # =============================================================================
 
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
 
 sys.path.insert(0, "/home/ryzen/projects")
+
+# Thread pool for parallel PDF processing (limit to 2 concurrent to avoid GPU contention)
+_pdf_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pdf_analysis")
 
 try:
     from home_ai.finance_agent.src import storage as fa_storage
@@ -513,6 +517,18 @@ def _run_phinance_analysis(job: Dict[str, Any], pdf_path: str):
     doc_id = job["doc_id"]
     job_id = job["job_id"]
     logger.info(f"Starting phinance analysis for {doc_id}")
+
+    if FA_STORAGE_AVAILABLE:
+        fa_storage.init_db()
+        if fa_storage.has_transactions_for_doc(doc_id):
+            logger.info(f"Skipping {doc_id} - transactions already cached")
+            cached_txs = fa_storage.get_transactions_by_doc(doc_id)
+            job["status"] = "completed"
+            job["completed_at"] = datetime.utcnow().isoformat()
+            job["transaction_count"] = len(cached_txs)
+            job["from_cache"] = True
+            _save_job(job)
+            return
 
     try:
         job["status"] = "running"
@@ -696,6 +712,155 @@ async def analyze_confirm(req: AnalyzeRequest):
     thread.start()
 
     return {"status": "started", "job_id": job.get("job_id"), "doc_id": doc_id}
+
+
+class BatchAnalyzeRequest(BaseModel):
+    doc_ids: List[str]
+    max_concurrent: int = 2
+
+
+@app.post("/analyze-batch")
+async def analyze_batch(req: BatchAnalyzeRequest):
+    """Process multiple PDFs in parallel with controlled concurrency."""
+    doc_ids = req.doc_ids
+    max_concurrent = min(req.max_concurrent, 4)
+
+    if not doc_ids:
+        raise HTTPException(status_code=400, detail="No doc_ids provided")
+
+    uploads_dir = Path("/home/ryzen/projects/home-ai/finance-agent/data/uploads")
+    results = []
+    jobs_to_process = []
+
+    for doc_id in doc_ids:
+        if FA_STORAGE_AVAILABLE:
+            fa_storage.init_db()
+            if fa_storage.has_transactions_for_doc(doc_id):
+                results.append(
+                    {
+                        "doc_id": doc_id,
+                        "status": "cached",
+                        "message": "Transactions already extracted",
+                    }
+                )
+                continue
+
+        pdf_files = list(uploads_dir.glob(f"*{doc_id}*.pdf"))
+        if not pdf_files:
+            results.append(
+                {"doc_id": doc_id, "status": "error", "error": "PDF not found"}
+            )
+            continue
+
+        pdf_path = str(pdf_files[0])
+        job_id = f"job-{doc_id}-{datetime.utcnow().strftime('%H%M%S')}"
+        job = {
+            "job_id": job_id,
+            "doc_id": doc_id,
+            "status": "queued",
+            "consent_given": 1,
+            "pdf_path": pdf_path,
+        }
+        _save_job(job)
+        jobs_to_process.append((job, pdf_path))
+        results.append({"doc_id": doc_id, "job_id": job_id, "status": "queued"})
+
+    if jobs_to_process:
+
+        def process_single(args):
+            job, pdf_path = args
+            _run_phinance_analysis(job, pdf_path)
+            return job["doc_id"]
+
+        for job, pdf_path in jobs_to_process:
+            _pdf_executor.submit(process_single, (job, pdf_path))
+
+    return {
+        "batch_id": f"batch-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}",
+        "total": len(doc_ids),
+        "queued": len(jobs_to_process),
+        "cached": sum(1 for r in results if r.get("status") == "cached"),
+        "errors": sum(1 for r in results if r.get("status") == "error"),
+        "results": results,
+    }
+
+
+@app.get("/api/transactions")
+async def get_transactions_paginated(
+    page: int = 1,
+    page_size: int = 50,
+    doc_id: Optional[str] = None,
+    category: Optional[str] = None,
+    merchant: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    """Paginated transactions endpoint with filtering for lazy loading."""
+    reports_base = Path("/home/ryzen/projects/home-ai/finance-agent/data/reports")
+    all_transactions = []
+
+    if doc_id:
+        report_dirs = [reports_base / doc_id]
+    else:
+        report_dirs = [d for d in reports_base.iterdir() if d.is_dir()]
+
+    for report_dir in report_dirs:
+        tx_file = report_dir / "transactions.json"
+        if tx_file.exists():
+            try:
+                with open(tx_file) as f:
+                    txs = json.load(f)
+                    for tx in txs:
+                        tx["source_doc"] = report_dir.name
+                    all_transactions.extend(txs)
+            except Exception as e:
+                logger.warning(f"Failed to load {tx_file}: {e}")
+
+    if category:
+        cat_lower = category.lower()
+        all_transactions = [
+            t
+            for t in all_transactions
+            if cat_lower in (t.get("category") or "").lower()
+        ]
+
+    if merchant:
+        merch_lower = merchant.lower()
+        all_transactions = [
+            t
+            for t in all_transactions
+            if merch_lower in (t.get("merchant") or "").lower()
+        ]
+
+    if date_from:
+        all_transactions = [
+            t for t in all_transactions if (t.get("date") or "") >= date_from
+        ]
+
+    if date_to:
+        all_transactions = [
+            t for t in all_transactions if (t.get("date") or "") <= date_to
+        ]
+
+    all_transactions.sort(key=lambda x: x.get("date", ""), reverse=True)
+
+    total = len(all_transactions)
+    total_pages = (total + page_size - 1) // page_size
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    page_data = all_transactions[start_idx:end_idx]
+
+    return {
+        "transactions": page_data,
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+            "has_next": page < total_pages,
+            "has_prev": page > 1,
+        },
+    }
 
 
 @app.get("/analysis-status/{doc_id}")

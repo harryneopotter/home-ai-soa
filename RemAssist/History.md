@@ -2,6 +2,41 @@
 
 ## 📅 Session History
 
+### December 31, 2025 - Performance Optimizations (Session 12)
+
+#### ⚡ Parallel Batch PDF Processing
+- **New Endpoint:** `POST /analyze-batch`
+  - Accepts `{"doc_ids": [...], "max_concurrent": 2}`
+  - Uses `ThreadPoolExecutor` with max 2 workers (GPU contention limit)
+  - Checks cache before processing each document
+  - Returns batch status with queued/cached/error counts
+- **File Modified:** `soa-webui/main.py`
+  - Added `_pdf_executor` ThreadPoolExecutor
+  - Added `BatchAnalyzeRequest` model
+  - Added `/analyze-batch` endpoint
+
+#### 💾 Transaction Caching
+- **File Modified:** `soa-webui/main.py` - `_run_phinance_analysis()`
+  - Now checks `has_transactions_for_doc()` before parsing
+  - If cached, marks job as completed with `from_cache: True`
+  - Skips expensive LLM calls for already-processed documents
+
+#### 📄 Paginated Transactions API
+- **New Endpoint:** `GET /api/transactions`
+  - Query params: `page`, `page_size`, `doc_id`, `category`, `merchant`, `date_from`, `date_to`
+  - Returns paginated transactions with metadata
+  - Supports filtering and server-side pagination
+
+#### 🎨 Dashboard Lazy Loading
+- **File Modified:** `soa-webui/templates/consolidated_dashboard.html`
+  - Added pagination state management (`paginationState`)
+  - Added pagination controls (Prev/Next, page size selector)
+  - `renderTransactionTable()` now paginates instead of slicing to 500
+  - `filterTransactions()` resets to page 1 on filter change
+  - `changePage()` and `changePageSize()` functions for navigation
+
+---
+
 ### December 31, 2025 - Security Hardening & UI Enhancements (Session 11)
 
 #### 🔧 Retry Logic Wired into call_phinance()

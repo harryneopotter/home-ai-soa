@@ -74,10 +74,10 @@ _Last updated: December 31, 2025 (Session 11)_
 - [ ] Add spending alerts/thresholds
 - [ ] Mobile responsive improvements
 
-### 4. Performance Optimizations
-- [ ] Parallel PDF processing for batch uploads
-- [ ] Transaction caching to avoid re-extraction
-- [ ] Lazy loading for large transaction tables
+### 4. Performance Optimizations ✅ COMPLETED (Dec 31, 2025)
+- [x] Parallel PDF processing for batch uploads (`/analyze-batch` with ThreadPoolExecutor)
+- [x] Transaction caching to avoid re-extraction (`has_transactions_for_doc()` check)
+- [x] Lazy loading for large transaction tables (paginated `/api/transactions` + UI pagination)
 
 ---
 
@@ -89,7 +89,7 @@ _Last updated: December 31, 2025 (Session 11)_
 - [ ] Improve finance context injection in `/api/chat`
 
 ### 6. Multi-Document Analysis
-- [ ] Support batch PDF uploads in single request
+- [x] Support batch PDF uploads in single request (`/analyze-batch` endpoint)
 - [ ] Cross-document spending comparison
 - [ ] Trend analysis across time periods
 - [ ] Merchant normalization (same merchant, different names)
@@ -102,10 +102,11 @@ _Last updated: December 31, 2025 (Session 11)_
 
 ---
 
-## 🏁 Recently Completed (Dec 31, 2025 - Sessions 9, 10 & 11)
+## 🏁 Recently Completed (Dec 31, 2025 - Sessions 9, 10, 11 & 12)
+- **Performance Optimizations**: Parallel batch processing, transaction caching, paginated lazy loading
 - **Security Hardening**: XSS fixes with escapeHtml(), path traversal protection
 - **Retry Logic Wired**: call_phinance() now retries with validation feedback
-- **UI Enhanced**: Date range picker, CSV export for transactions
+- **UI Enhanced**: Date range picker, CSV export, pagination controls for transactions
 - **GPU Eviction Fix**: Models now stay at 100% GPU throughout analysis
 - **Consolidated Dashboard**: Full dashboard with charts, tables, AI insights
 - **LLM Response Validation**: Pydantic schemas catch malformed LLM responses

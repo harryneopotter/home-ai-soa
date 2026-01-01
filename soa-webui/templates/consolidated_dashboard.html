@@ -311,7 +311,20 @@
                             <tbody id="txnBody"></tbody>
                         </table>
                     </div>
-                    <p id="txnCount" style="margin-top: 15px; color: #94A3B8;"></p>
+                    <div id="paginationControls" style="margin-top: 15px; display: flex; justify-content: space-between; align-items: center;">
+                        <p id="txnCount" style="color: #94A3B8;"></p>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <button id="prevPageBtn" onclick="changePage(-1)" style="padding: 8px 16px; background: rgba(59,130,246,0.2); border: 1px solid rgba(59,130,246,0.5); border-radius: 6px; color: #60A5FA; cursor: pointer;">← Prev</button>
+                            <span id="pageInfo" style="color: #94A3B8;">Page 1</span>
+                            <button id="nextPageBtn" onclick="changePage(1)" style="padding: 8px 16px; background: rgba(59,130,246,0.2); border: 1px solid rgba(59,130,246,0.5); border-radius: 6px; color: #60A5FA; cursor: pointer;">Next →</button>
+                            <select id="pageSizeSelect" onchange="changePageSize()" style="padding: 8px; background: rgba(30,41,59,0.8); border: 1px solid rgba(96,165,250,0.3); border-radius: 6px; color: #B0B8C1;">
+                                <option value="25">25 per page</option>
+                                <option value="50" selected>50 per page</option>
+                                <option value="100">100 per page</option>
+                                <option value="250">250 per page</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="insights" class="page-content">
@@ -339,6 +352,14 @@
     <script>
         let reportData = null;
         let allTransactions = [];
+        let currentFilteredTransactions = [];
+        let paginationState = {
+            page: 1,
+            pageSize: 50,
+            total: 0,
+            totalPages: 0,
+            useLazyLoading: false
+        };
 
         function escapeHtml(str) {
             if (str === null || str === undefined) return '';
@@ -353,6 +374,10 @@
                 if (!resp.ok) throw new Error('Failed to load consolidated report');
                 reportData = await resp.json();
                 allTransactions = reportData.transactions || [];
+                
+                paginationState.total = allTransactions.length;
+                paginationState.totalPages = Math.ceil(allTransactions.length / paginationState.pageSize);
+                paginationState.useLazyLoading = allTransactions.length > 500;
 
                 renderOverview();
                 renderMonthlyChart();
@@ -455,8 +480,6 @@
             });
         }
 
-        let currentFilteredTransactions = [];
-
         function parseDate(dateStr) {
             if (!dateStr) return null;
             const patterns = [
@@ -508,6 +531,7 @@
             else if (sort === 'amount-asc') filtered.sort((a,b) => Math.abs(a.amount) - Math.abs(b.amount));
 
             currentFilteredTransactions = filtered;
+            paginationState.page = 1;
             renderTransactionTable(filtered);
         }
 
@@ -549,8 +573,13 @@
         }
 
         function renderTransactionTable(txns) {
+            const { page, pageSize } = paginationState;
+            const start = (page - 1) * pageSize;
+            const end = start + pageSize;
+            const pageData = txns.slice(start, end);
+            
             const tbody = document.getElementById('txnBody');
-            tbody.innerHTML = txns.slice(0, 500).map(t => `
+            tbody.innerHTML = pageData.map(t => `
                 <tr>
                     <td>${escapeHtml(t.date || 'N/A')}</td>
                     <td style="color: #fff; font-weight: 500;">${escapeHtml((t.merchant || 'Unknown').substring(0, 50))}</td>
@@ -559,7 +588,38 @@
                     <td style="color: #6B7280; font-size: 0.8rem;">${escapeHtml((t.source_doc || '').substring(0, 20))}</td>
                 </tr>
             `).join('');
-            document.getElementById('txnCount').textContent = `Showing ${Math.min(txns.length, 500)} of ${txns.length} transactions`;
+            
+            paginationState.total = txns.length;
+            paginationState.totalPages = Math.ceil(txns.length / pageSize);
+            updatePaginationUI();
+        }
+        
+        function updatePaginationUI() {
+            const { page, pageSize, total, totalPages } = paginationState;
+            const start = (page - 1) * pageSize + 1;
+            const end = Math.min(page * pageSize, total);
+            
+            document.getElementById('txnCount').textContent = `Showing ${start}-${end} of ${total} transactions`;
+            document.getElementById('pageInfo').textContent = `Page ${page} of ${totalPages}`;
+            document.getElementById('prevPageBtn').disabled = page <= 1;
+            document.getElementById('nextPageBtn').disabled = page >= totalPages;
+            document.getElementById('prevPageBtn').style.opacity = page <= 1 ? '0.5' : '1';
+            document.getElementById('nextPageBtn').style.opacity = page >= totalPages ? '0.5' : '1';
+        }
+        
+        function changePage(delta) {
+            const newPage = paginationState.page + delta;
+            if (newPage < 1 || newPage > paginationState.totalPages) return;
+            paginationState.page = newPage;
+            const txns = currentFilteredTransactions.length > 0 ? currentFilteredTransactions : allTransactions;
+            renderTransactionTable(txns);
+        }
+        
+        function changePageSize() {
+            paginationState.pageSize = parseInt(document.getElementById('pageSizeSelect').value);
+            paginationState.page = 1;
+            const txns = currentFilteredTransactions.length > 0 ? currentFilteredTransactions : allTransactions;
+            renderTransactionTable(txns);
         }
 
         function renderInsights() {
