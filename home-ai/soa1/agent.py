@@ -15,6 +15,7 @@ from batch_processor import batch_processor
 from output_generator import output_generator
 from utils.logger import get_logger
 from utils.errors import ValidationError, ServiceError, InternalError
+from utils.merchant_normalizer import normalize_transactions
 
 logger = get_logger("agent")
 
@@ -85,9 +86,7 @@ class SOA1Agent:
         if self.tts_enabled:
             logger.info("TTS is disabled in this build")
 
-    # ---------------------------------------------------------
     # Format memory context (with time awareness)
-    # ---------------------------------------------------------
     def _format_memory_context(self, memories: List[Dict[str, Any]]) -> str:
         if not memories:
             return "No relevant past memories were found."
@@ -119,9 +118,7 @@ class SOA1Agent:
 
         return "\n".join(lines)
 
-    # ---------------------------------------------------------
     # Format Document Context (for progressive engagement)
-    # ---------------------------------------------------------
     def _format_document_context(
         self, document_context: Optional[Dict[str, Any]]
     ) -> str:
@@ -200,6 +197,9 @@ class SOA1Agent:
                 logger.warning(f"Could not load transactions from storage: {e}")
                 all_transactions = []
 
+            if all_transactions:
+                all_transactions = normalize_transactions(all_transactions)
+
             if not all_transactions:
                 return (
                     "I couldn't find any transaction data for these documents. "
@@ -214,7 +214,7 @@ class SOA1Agent:
             }
 
             logger.info(f"Invoking phinance with {len(all_transactions)} transactions")
-            raw_response = call_phinance(json.dumps(payload))
+            raw_response, _ = call_phinance(json.dumps(payload))
 
             try:
                 analysis = json.loads(raw_response)
@@ -277,38 +277,83 @@ class SOA1Agent:
         )
         return "\n".join(lines)
 
-    # ---------------------------------------------------------
     # TTS Methods
-    # ---------------------------------------------------------
     def ask_with_tts(self, query: str) -> Dict[str, Any]:
         """TTS disabled - falls back to regular ask"""
         logger.warning("TTS requested but disabled in this build")
         return self.ask(query)
 
-    # ---------------------------------------------------------
     # Main Agent Logic
-    # ---------------------------------------------------------
-    async def analyze_preliminary(self, batch_id: str):
-        state = batch_processor.get_batch_state(batch_id)
-        if not state:
-            return
-
-        all_text = ""
-        for doc in state.files:
-            all_text += doc.get("text_preview", "") + "\n"
-
-        prompt = (
-            f"Analyze these documents and provide preliminary insights:\n{all_text}"
-        )
+    async def analyze_preliminary_text(self, text: str) -> Dict[str, Any]:
+        prompt = f"Analyze this text and provide preliminary insights, transaction count, and interesting findings in JSON format:\n{text}"
         convo = [{"role": "user", "content": prompt}]
 
         try:
             response = self.model.chat(self.system_prompt, convo)
-            state.preliminary_insights = {"summary": response}
-            state.status = "ready"
-            state.analysis_ready_at = time.time()
+            try:
+                start = response.find("{")
+                end = response.rfind("}") + 1
+                if start != -1 and end != 0:
+                    return json.loads(response[start:end])
+            except:
+                pass
+
+            return {
+                "insights": {"summary": response},
+                "interesting": [],
+                "transaction_count": 0,
+                "transactions": [],
+            }
         except Exception as e:
             logger.error(f"Preliminary analysis failed: {e}")
+            return {}
+
+    async def analyze_batch(self, batch_id: str):
+        state = batch_processor.get_batch_state(batch_id)
+        if not state:
+            return
+
+        try:
+            from models import call_phinance_validated
+
+            payload = {
+                "text": state.phinance_prompt,
+                "currency": "USD",
+                "request_type": "full_analysis",
+            }
+
+            logger.info(
+                f"Calling phinance for batch {batch_id} with validation and retries"
+            )
+            (transactions, analysis), attempts = call_phinance_validated(
+                json.dumps(payload)
+            )
+            logger.info(
+                f"Phinance analysis complete for {batch_id} in {attempts} attempt(s)."
+            )
+
+            analysis_dict = analysis.model_dump()
+            analysis_dict["transactions"] = [
+                t.model_dump() for t in transactions.transactions
+            ]
+
+            if "transactions" in analysis_dict and isinstance(
+                analysis_dict["transactions"], list
+            ):
+                analysis_dict["transactions"] = normalize_transactions(
+                    analysis_dict["transactions"]
+                )
+
+            state.phinance_analysis = analysis_dict
+            state.phinance_attempts = attempts
+            state.status = "complete"
+            state.phinance_complete_at = time.time()
+
+            await batch_processor.pre_generate_outputs(batch_id, output_generator)
+
+        except Exception as e:
+            logger.error(f"Batch analysis failed for {batch_id}: {e}")
+            state.status = "failed"
 
     def ask(
         self,

@@ -52,9 +52,19 @@ class SimplePDFProcessor:
                     text.append(page.extract_text() or "")
 
                 text_content = "\n".join(text)
+
+                is_apple_card = (
+                    "Apple Card" in text_content
+                    and "Goldman Sachs Bank" in text_content
+                )
+                if is_apple_card:
+                    logger.info(
+                        "Apple Card statement detected - applying specialized extraction"
+                    )
+
                 redacted_text, pii_counts = self.redactor.redact(text_content)
                 logger.info(f"PII Redaction complete: {pii_counts}")
-                return redacted_text
+                return redacted_text, is_apple_card
 
         except Exception as e:
             logger.error(f"PDF extraction failed: {e}")
@@ -74,7 +84,7 @@ class SimplePDFProcessor:
                 temp_file.write(content)
 
             # Extract text
-            text_content = self.extract_text_from_pdf(temp_path)
+            text_content, is_apple_card = self.extract_text_from_pdf(temp_path)
 
             # Get accurate file size and page count
             file_size_bytes = os.path.getsize(temp_path)
@@ -103,6 +113,7 @@ class SimplePDFProcessor:
                 "full_text": text_content,
                 "encrypted_text": encrypted_text,
                 "file_size_bytes": file_size_bytes,
+                "is_apple_card": is_apple_card,
             }
 
         except Exception as e:

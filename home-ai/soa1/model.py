@@ -104,20 +104,23 @@ class ModelClient:
         )
 
         # Structured model call logging (non-blocking)
+        correlation_id = None
         try:
-            from utils.model_logging import log_model_call
+            from utils.model_logging import log_model_call, generate_correlation_id
 
+            correlation_id = generate_correlation_id()
             log_model_call(
                 model_name=self.model_name,
                 resolved_model=self.model_name,
                 endpoint="/api/chat",
                 prompt_source="nemoagent",
-                prompt_type="system+user",
+                prompt_type="request",
                 prompt_text=system_prompt
                 + "\n"
                 + "\n".join([m.get("content", "") for m in conversation]),
                 options=payload.get("options"),
                 redact=True,
+                correlation_id=correlation_id,
             )
         except Exception:
             pass
@@ -192,6 +195,7 @@ class ModelClient:
                 latency_ms=latency_ms,
                 status="success",
                 redact=True,
+                correlation_id=correlation_id,
             )
         except Exception:
             pass

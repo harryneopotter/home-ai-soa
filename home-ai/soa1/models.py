@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -62,6 +63,20 @@ def _load_model_endpoints() -> Dict[str, ModelEndpoint]:
     if CONFIG_PATH.exists():
         with CONFIG_PATH.open("r", encoding="utf-8") as fh:
             cfg = yaml.safe_load(fh) or {}
+
+        specialists = cfg.get("specialists", {})
+        finance_cfg = specialists.get("finance", {})
+        if finance_cfg:
+            DEFAULT_MODELS["phinance"]["model_name"] = finance_cfg.get(
+                "model_name", DEFAULT_MODELS["phinance"]["model_name"]
+            )
+
+        orchestrator_cfg = cfg.get("orchestrator", {})
+        if orchestrator_cfg:
+            DEFAULT_MODELS["nemotron"]["model_name"] = orchestrator_cfg.get(
+                "model_name", DEFAULT_MODELS["nemotron"]["model_name"]
+            )
+
         models_cfg = cfg.get("models", DEFAULT_MODELS) or DEFAULT_MODELS
 
     endpoints: Dict[str, ModelEndpoint] = {}
@@ -97,7 +112,7 @@ def call_phinance(
     payload_json: str,
     validate: bool = False,
     retry_config: Optional[RetryConfig] = None,
-) -> str:
+) -> Tuple[str, int]:
     """Send structured JSON (USD) payload to Phinance for finance analysis.
 
     Args:
@@ -106,7 +121,7 @@ def call_phinance(
         retry_config: If provided, enables retry with feedback on validation failure
 
     Returns:
-        Raw LLM response string (caller should validate if needed)
+        Tuple of (Raw LLM response string, number of attempts made)
     """
 
     if not isinstance(payload_json, str) or not payload_json.strip():
@@ -118,18 +133,56 @@ def call_phinance(
         raise ValueError("Phinance payload must be valid JSON") from exc
 
     payload_dict.setdefault("currency", "USD")
-    sanitized = json.dumps(payload_dict)
 
     endpoint = _ENDPOINTS["phinance"]
+
+    is_apple_card = False
+    text_content = payload_dict.get("text", "")
+    if isinstance(text_content, str) and "[FORMAT:APPLE_CARD]" in text_content:
+        is_apple_card = True
+        text_content = text_content.replace("[FORMAT:APPLE_CARD]\n", "", 1).replace(
+            "[FORMAT:APPLE_CARD]", "", 1
+        )
+        payload_dict["text"] = text_content
+        logger.info("Apple Card format detected - using specialized extraction prompt")
+
+    sanitized = json.dumps(payload_dict)
+
     base_prompt = f"Analyze the following finance payload in USD. Respond with structured JSON.\n{sanitized}"
+    if is_apple_card:
+        base_prompt = (
+            "You are analyzing an Apple Card statement. Extract ALL transactions from the text.\n\n"
+            "The statement contains:\n"
+            "1. A 'Payments' section with ACH deposits (negative amounts = payments made)\n"
+            "2. A 'Transactions' section with purchases (columns: Date, Description, Daily Cash, Amount)\n\n"
+            "Extract each transaction with:\n"
+            "- date: The transaction date (format: MM/DD/YYYY)\n"
+            "- merchant: The merchant/description\n"
+            "- amount: The dollar amount (positive for purchases, negative for payments)\n"
+            "- category: Infer category from merchant name (e.g., 'Groceries', 'Utilities', 'Shopping', 'Dining', 'Gas', 'Services', 'Other')\n\n"
+            "Also provide:\n"
+            "- total_spent: Sum of all purchase amounts (positive transactions only)\n"
+            "- total_payments: Sum of all payment amounts (absolute value of negative transactions)\n"
+            "- categories: Breakdown by category with totals\n"
+            "- insights: 2-3 observations about spending patterns\n\n"
+            "Respond with valid JSON in this schema:\n"
+            "{\n"
+            '  "transactions": [{"date": "...", "merchant": "...", "amount": 0.00, "category": "..."}],\n'
+            '  "total_spent": 0.00,\n'
+            '  "total_payments": 0.00,\n'
+            '  "categories": {"category_name": 0.00},\n'
+            '  "insights": ["...", "..."]\n'
+            "}\n\n"
+            f"Statement text:\n{text_content}"
+        )
 
     # If no retry config, single attempt
     if retry_config is None:
         model_payload = _build_chat_payload(endpoint, base_prompt)
-        response = _dispatch_request(endpoint, model_payload)
+        response = _dispatch_request(endpoint, model_payload, prompt_source="phinance", attempt=1)
         if validate:
             validate_phinance_response(response)
-        return response
+        return response, 1
 
     # Retry loop with validation feedback
     last_error: Optional[LLMValidationError] = None
@@ -151,17 +204,17 @@ def call_phinance(
             prompt = build_retry_prompt(base_prompt, context, retry_config)
 
         model_payload = _build_chat_payload(endpoint, prompt)
-        response = _dispatch_request(endpoint, model_payload)
+        response = _dispatch_request(endpoint, model_payload, prompt_source="phinance", attempt=1)
         last_response = response
 
         # Validate if requested
         if not validate:
-            return response
+            return response, attempt
 
         try:
             validate_phinance_response(response)
             logger.info(f"Phinance validation passed on attempt {attempt}")
-            return response
+            return response, attempt
         except LLMValidationError as e:
             last_error = e
             logger.warning(
@@ -177,16 +230,20 @@ def call_phinance(
 def call_phinance_validated(
     payload_json: str,
     retry_config: Optional[RetryConfig] = None,
-) -> Tuple[TransactionsResponse, AnalysisResponse]:
-    """Send payload to Phinance and return validated, typed response objects.
+) -> Tuple[Tuple[TransactionsResponse, AnalysisResponse], int]:
+    """Send payload to Phinance and return validated, typed response objects and attempts count.
 
     This is the preferred method when you need structured data.
     Raises LLMValidationError if response doesn't match expected schema.
+    Returns:
+        Tuple of (Tuple[TransactionsResponse, AnalysisResponse], number of attempts made)
     """
     if retry_config is None:
         retry_config = RetryConfig(max_attempts=3)
 
-    raw_response = call_phinance(payload_json, validate=True, retry_config=retry_config)
+    raw_response, attempts = call_phinance(
+        payload_json, validate=True, retry_config=retry_config
+    )
 
     try:
         transactions, txn_warnings = validate_transactions(raw_response)
@@ -199,7 +256,7 @@ def call_phinance_validated(
     if analysis_warnings:
         logger.warning(f"Analysis validation warnings: {analysis_warnings}")
 
-    return transactions, analysis
+    return (transactions, analysis), attempts
 
 
 def validate_phinance_response(raw_response: str) -> None:
@@ -237,13 +294,105 @@ def _build_chat_payload(endpoint: ModelEndpoint, user_content: str) -> Dict:
     }
 
 
-def _dispatch_request(endpoint: ModelEndpoint, payload: Dict) -> str:
-    response = requests.post(endpoint.chat_url, json=payload, timeout=60)
-    response.raise_for_status()
-    data = response.json()
+def _dispatch_request(
+    endpoint: ModelEndpoint,
+    payload: Dict,
+    prompt_source: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    attempt: Optional[int] = None,
+) -> str:
+    """Dispatch request to model endpoint with structured logging.
+    
+    Args:
+        endpoint: Model endpoint configuration
+        payload: Request payload
+        prompt_source: Source identifier for logging (defaults to endpoint.name)
+        correlation_id: Unique ID to correlate request/response logs
+        attempt: Attempt number for retry scenarios
+    """
+    source = prompt_source or endpoint.name
+    logger.info(
+        f"Dispatching request to {endpoint.chat_url} for model {endpoint.model_name}"
+    )
+    start_time = time.time()
     try:
+        try:
+            from utils.model_logging import log_model_call, generate_correlation_id
+
+            if correlation_id is None:
+                correlation_id = generate_correlation_id()
+
+            log_model_call(
+                model_name=endpoint.model_name,
+                resolved_model=endpoint.model_name,
+                endpoint="/api/chat",
+                prompt_source=source,
+                prompt_type="request",
+                prompt_text=payload.get("messages", [{}])[0].get("content", ""),
+                options=payload.get("options"),
+                redact=True,
+                correlation_id=correlation_id,
+                attempt=attempt,
+            )
+        except Exception:
+            pass
+
+        response = requests.post(endpoint.chat_url, json=payload, timeout=60)
+        if response.status_code != 200:
+            logger.error(
+                f"Error from {endpoint.name} ({endpoint.chat_url}): {response.status_code} {response.text}"
+            )
+        response.raise_for_status()
+        data = response.json()
+
+        latency_ms = (time.time() - start_time) * 1000
+        content = ""
         if "message" in data and "content" in data["message"]:
-            return data["message"]["content"].strip()
-        return data["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError) as exc:
-        raise RuntimeError(f"Unexpected response from {endpoint.name}: {data}") from exc
+            content = data["message"]["content"].strip()
+        elif "choices" in data and data["choices"]:
+            content = data["choices"][0]["message"]["content"].strip()
+
+        try:
+            from utils.model_logging import log_model_call
+
+            log_model_call(
+                model_name=endpoint.model_name,
+                resolved_model=endpoint.model_name,
+                endpoint="/api/chat",
+                prompt_source=source,
+                prompt_type="response",
+                prompt_text=content,
+                response_text=content,
+                latency_ms=latency_ms,
+                status="success",
+                redact=True,
+                correlation_id=correlation_id,
+                attempt=attempt,
+            )
+        except Exception:
+            pass
+
+        return content
+    except Exception as exc:
+        latency_ms = (time.time() - start_time) * 1000
+        logger.error(f"Request to {endpoint.name} failed: {exc}")
+        try:
+            from utils.model_logging import log_model_call
+
+            log_model_call(
+                model_name=endpoint.model_name,
+                resolved_model=endpoint.model_name,
+                endpoint="/api/chat",
+                prompt_source=source,
+                prompt_type="error",
+                prompt_text=str(exc),
+                latency_ms=latency_ms,
+                status="error",
+                error=str(exc),
+                redact=True,
+                correlation_id=correlation_id,
+                attempt=attempt,
+            )
+        except Exception:
+            pass
+        raise

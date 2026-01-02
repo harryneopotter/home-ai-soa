@@ -8,16 +8,22 @@ class OutputGenerator:
             return {}
 
         dashboard = {
-            "summary": analysis.get("summary", {}),
+            "summary": analysis.get("summary") or analysis.get("insights") or {},
             "charts": {
-                "by_category": analysis.get("by_category", {}),
-                "by_month": analysis.get("by_month", {}),
-                "by_merchant": analysis.get("by_merchant", {}),
+                "by_category": analysis.get("by_category")
+                or analysis.get("categories")
+                or {},
+                "by_month": analysis.get("by_month") or {},
+                "by_merchant": analysis.get("by_merchant")
+                or analysis.get("top_merchants")
+                or {},
             },
             "metrics": {
-                "total_spent": analysis.get("total_spent", 0),
-                "transaction_count": analysis.get("transaction_count", 0),
-                "top_category": analysis.get("top_category", ""),
+                "total_spent": analysis.get("total_spent")
+                or analysis.get("total")
+                or 0,
+                "transaction_count": analysis.get("transaction_count") or 0,
+                "top_category": analysis.get("top_category") or "",
             },
         }
         return dashboard

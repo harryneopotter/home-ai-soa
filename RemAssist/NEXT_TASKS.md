@@ -1,97 +1,54 @@
 # 📋 RemAssist — Unified Task Queue
 *Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-_Last updated: January 1, 2026 (Session 16)_
+_Last updated: January 2, 2026 (Bug Fix and Input Validation Session)_
 
 ---
 
 ## 🔍 Current System Snapshot
+- ✅ **Rate Limiting Implemented**: Configured for all public-facing endpoints (10/min for uploads, 20/min for TTS, 100/min for general API).
+- ✅ **Apple Card Fix Implemented**: Logic fixed in `models.py` to correctly trigger specialized extraction prompt, resulting in non-zero metrics.
 - ✅ Working: SOA1 API, WebUI, Ollama, MemLayer, finance pipeline, E2E tests passing
 - ✅ GPU Status: NemoAgent (13GB, GPU 0, 100%), phinance-json (4GB, GPU 1, 100%)
-- ✅ GPU Fix: `num_gpu: 99`, `num_ctx: 32768` applied to all model calls
-- ✅ Performance: 8 PDFs in 84s (~10.5s avg), 437 transactions extracted
-- ✅ **Consolidated Dashboard**: `/dashboard/consolidated` with charts, tables, filtering
-- ✅ **LLM Response Validation**: Pydantic schemas for phinance output validation
-- ✅ **Retry Logic Wired**: `call_phinance()` now retries with validation feedback (max 3 attempts)
-- ✅ **Security Hardened**: XSS fixes (escapeHtml), path traversal protection
-- ✅ **UI Enhanced**: Date range picker, CSV export for transactions
-- ✅ **Chat History**: Persistent chat history with multi-turn context
-- ✅ **Cross-Doc Compare**: `/api/reports/compare` endpoint for multi-document comparison
-- ✅ **Merchant Normalization**: 40+ patterns for common merchants (Amazon, Uber, etc.)
-- ✅ Consent endpoint registered at `/api/consent`
-- ✅ Phinance model calls now logged to `logs/model_calls.jsonl`
-- ✅ Monitoring Dashboard: `/monitoring` endpoint with system stats, services, GPUs, logs, jobs
-- ✅ **Upload Response Architecture**: LLM-generated upload responses (Session 15)
+- ✅ **Progressive Batch Architecture**: Logic complete (WebUI integration complete, backend logic complete).
+- ✅ **Model Call Logging**: Enhanced with correlation IDs, attempt tracking, and proper source identification.
 
 ---
 
 ## 🚀 Immediate Priority Tasks
 
-### 0. Upload Response Architecture Fix ✅ COMPLETED (Session 15)
-**Reference:** `RemAssist/LLM_DRIVEN_RESPONSES.md`
-
-- [x] Modify `/upload-pdf` to call `SOA1Agent.ask()` after successful upload
-- [x] Pass document context (filename, pages, size, detected type) to agent
-- [x] LLM generates contextual acknowledgment following orchestrator.md guidelines
-- [x] Update frontend to display API response directly (remove hardcoded fallback)
-- [x] Test upload flow returns proper LLM-generated response with options
-
-### 5. Chat Context & Memory Improvements ✅ COMPLETED (Dec 31, 2025)
-- [x] Implement chat history persistence (`chat_history` table in storage.py)
-- [x] Load chat history in `/api/chat` endpoint (last 20 messages)
-- [x] Pass chat history to `agent.ask()` for multi-turn context
-- [ ] Add conversation memory to MemLayer for cross-session context (future)
-- [ ] Improve finance context injection in `/api/chat` (future)
-
-### 6. Multi-Document Analysis ✅ COMPLETED (Dec 31, 2025)
-- [x] Support batch PDF uploads in single request (`/analyze-batch` endpoint)
-- [x] Cross-document spending comparison (`POST /api/reports/compare`)
-- [x] Merchant normalization (same merchant, different names) - `merchant_normalizer.py`
-- [ ] Trend analysis across time periods (future)
-- [ ] Integrate merchant normalization into extraction pipeline (future)
-
-### 1.1 Keep-Alive & Ollama API Standardization ✅ COMPLETED (Dec 31, 2025)
-- [x] `home-ai/soa1/models.py` - uses `/api/chat` with `keep_alive: -1` ✅
-- [x] `home-ai/finance-agent/src/models.py` - uses `num_gpu: 99`, `num_ctx` ✅
-- [x] Add integration test verifying models are pinned (`test_ollama_keepalive_integration.py`)
-- [ ] Add linter/CI check for `/v1` endpoints where `keep_alive` is required (future)
-
----
-
-## 🔜 Potential Next Steps
-
-### 🚀 Progressive Batch Architecture (MAJOR FEATURE)
+### 1. Progressive Batch Architecture (MAJOR FEATURE)
 **Reference:** `RemAssist/PROGRESSIVE_BATCH_ARCHITECTURE.md`
 
 Complete 5-phase pipeline for batch uploads with parallel processing:
 - [x] **Security Layer** (Priority 1 - required for production)
-  - [x] `soa1/security/pii_redactor.py` - PII detection & redaction
-  - [x] `soa1/security/encrypted_storage.py` - AES-256-GCM encryption
-  - [x] Integrate into existing upload flow
 - [x] **Batch Processing** (Priority 2 - enables better UX)
-  - [x] `soa1/batch_processor.py` - BatchState management
-  - [x] Background analysis task (pre-build Phinance prompt)
-  - [x] Update API endpoints for batch uploads
 - [x] **Output Pre-generation** (Priority 3 - polish)
-  - [x] `soa1/output_generator.py` - Dashboard, PDF, infographic prompts
-  - [x] Phase 4-5 implementation (instant delivery)
+- [x] **WebUI Integration** (Priority 4)
+  - [x] Update `index.html` for batch upload UI
+  - [x] Implement progressive display (Phase 1-5)
+  - [x] Add output selection buttons (Dashboard, PDF, Infographic)
 
-### 7. Security Hardening
-- [ ] Rate limiting on all API endpoints
-- [ ] API key authentication for sensitive endpoints
-- [ ] Audit logging for all data access
-- [ ] HTTPS enforcement
+### 2. Pipeline Enhancements
+- [x] Integrate merchant normalization into transaction extraction pipeline
+- [x] Add metrics for retry success rate (phinance_attempts tracked in BatchState)
+- [x] Add input length limits to all API endpoints
 
-### 8. UI Enhancements (Remaining)
-- [ ] Add export to PDF functionality (needs jsPDF library)
-- [ ] Add spending alerts/thresholds
-- [ ] Mobile responsive improvements
-- [ ] Cross-document comparison UI
+### 3. Comprehensive Security Hardening (Deferred)
+- [ ] Comprehensive Security Hardening (API Key Auth, Audit Logging, HTTPS Enforcement) for future development phase.
 
-### 9. Pipeline Enhancements
-- [ ] Integrate merchant normalization into transaction extraction pipeline
-- [ ] Add metrics for retry success rate (needs monitoring integration)
-- [ ] Add input length limits to all API endpoints
+---
+
+## 📚 Session Documentation
+- [x] Update `RemAssist/History.md` with current session summary.
+- [x] Update `RemAssist/NEXT_TASKS.md` with final status.
+
+---
+
+## 🏁 Recently Completed (Jan 2, 2026 - Sessions 19-21)
+- **Session 21**: Fixed _invoke_phinance() tuple unpacking bug, added input length limits to all API endpoints, code cleanup.
+- **Session 20**: Implemented Rate Limiting on all public API endpoints. Deferred comprehensive security hardening.
+- **Session 19**: Fixed critical Apple Card extraction bug in `models.py` and verified non-zero metrics via E2E test.
 
 ---
 

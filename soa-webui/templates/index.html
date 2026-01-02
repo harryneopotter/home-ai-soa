@@ -242,11 +242,11 @@
                 }
                 fileNameDisplay.classList.remove('hidden');
                 uploadBtn.disabled = false;
-                uploadBtn.textContent = input.files.length > 1 ? 'PROCESS FILES' : 'PROCESS FILE';
+                uploadBtn.textContent = input.files.length > 1 ? 'UPLOAD BATCH' : 'UPLOAD FILE';
             } else {
                 fileNameDisplay.classList.add('hidden');
                 uploadBtn.disabled = true;
-                uploadBtn.textContent = 'PROCESS FILE';
+                uploadBtn.textContent = 'UPLOAD FILE';
             }
         }
 
@@ -259,55 +259,92 @@
 
             const files = Array.from(input.files);
             const totalFiles = files.length;
-            let successCount = 0;
-            let errorCount = 0;
-
+            
             btn.disabled = true;
-            btn.textContent = 'TRANSMITTING...';
+            btn.textContent = `UPLOADING ${totalFiles} FILES...`;
             status.className = 'mt-4 text-[10px] p-2 border border-accent-neon-orange text-accent-neon-orange';
             status.classList.remove('hidden');
 
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-                status.textContent = `UPLOADING ${i + 1}/${totalFiles}: ${file.name}...`;
+            const formData = new FormData();
+            files.forEach(file => {
+                // Append all files under the 'files' key, as expected by the backend /upload-batch endpoint
+                formData.append('files', file, file.name);
+            });
 
-                const formData = new FormData();
-                formData.append('file', file);
+            try {
+                // Use a new proxy endpoint designed for batch uploads
+                const response = await fetch('/api/proxy/upload-batch', {
+                    method: 'POST',
+                    body: formData
+                });
 
-                try {
-                    const response = await fetch('/api/proxy/upload', {
-                        method: 'POST',
-                        body: formData
-                    });
-
-                    const data = await response.json();
+                const data = await response.json();
+                
+                if (response.ok) {
+                    const batchId = data.batch_id;
+                    const msg = data.agent_response || `Received ${totalFiles} files. Starting batch analysis.`;
+                    appendMessage('agent', msg);
                     
-                    if (response.ok) {
-                        successCount++;
-                        const msg = data.agent_response || `Received: ${file.name}`;
-                        appendMessage('agent', msg);
-                    } else {
-                        errorCount++;
-                        appendMessage('agent', `Error uploading ${file.name}: ${data.message || 'Unknown error'}`);
-                    }
-                } catch (e) {
-                    errorCount++;
-                    appendMessage('agent', `Failed to upload ${file.name}: ${e.message}`);
-                }
-            }
+                    // Start polling for status
+                    pollBatchStatus(batchId, totalFiles);
 
-            if (errorCount === 0) {
-                status.textContent = `SUCCESS: ${successCount} file(s) uploaded`;
-                status.className = 'mt-4 text-[10px] p-2 border border-accent-green text-accent-green';
-            } else {
-                status.textContent = `DONE: ${successCount} success, ${errorCount} failed`;
+                } else {
+                    appendMessage('agent', `ERROR: Batch upload failed (${response.status_code}): ${data.message || 'Unknown error'}`);
+                    status.textContent = `ERROR: Batch upload failed.`;
+                    status.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
+                    btn.disabled = false;
+                    btn.textContent = 'UPLOAD BATCH';
+                }
+            } catch (e) {
+                appendMessage('agent', `ERROR: Failed to connect to API: ${e.message}`);
+                status.textContent = `ERROR: Failed to connect to API.`;
                 status.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
+                btn.disabled = false;
+                btn.textContent = 'UPLOAD BATCH';
             }
 
             input.value = '';
             document.getElementById('fileName').classList.add('hidden');
-            btn.disabled = true;
-            btn.textContent = 'PROCESS FILE';
+        }
+
+        async function pollBatchStatus(batchId, totalFiles) {
+            const statusEl = document.getElementById('uploadStatus');
+            const btn = document.getElementById('uploadBtn');
+            
+            const interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/batch/status?batch_id=${batchId}`);
+                    const data = await response.json();
+                    const status = data.status;
+                    const outputsReady = data.outputs_ready;
+                    
+                    statusEl.textContent = `BATCH ${batchId} STATUS: ${status.toUpperCase()}`;
+                    
+                    if (status === 'complete' && outputsReady) {
+                        clearInterval(interval);
+                        statusEl.textContent = `ANALYSIS COMPLETE: ${totalFiles} files processed.`;
+                        statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-green text-accent-green';
+                        
+                        // Append final message with dashboard link
+                        appendMessage('agent', `✅ Analysis for batch ${batchId} is complete. You can now view the consolidated dashboard.`);
+                        
+                        btn.disabled = false;
+                        btn.textContent = 'UPLOAD BATCH';
+                    } else if (status === 'failed') {
+                        clearInterval(interval);
+                        statusEl.textContent = `ANALYSIS FAILED. Check logs.`;
+                        statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
+                        btn.disabled = false;
+                        btn.textContent = 'UPLOAD BATCH';
+                    }
+                } catch (e) {
+                    clearInterval(interval);
+                    statusEl.textContent = `POLLING ERROR. Check console.`;
+                    statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
+                    btn.disabled = false;
+                    btn.textContent = 'UPLOAD BATCH';
+                }
+            }, 3000); // Poll every 3 seconds
         }
 
         function handleEnter(e) {
@@ -364,15 +401,15 @@
             content.className = 'text-sm leading-relaxed';
             content.style.whiteSpace = 'pre-wrap';
             
-            // Detect analysis success and doc_id to show dashboard link
-            // For demo purposes, we look for doc_id patterns in responses
-            const docMatch = text.match(/finance-\d{8}-\d{6}-\w{6}/);
-            if (docMatch && role === 'agent') {
+            // Detect analysis success and doc_id/batch_id to show dashboard link
+            const batchMatch = text.match(/batch-\w{8}/);
+            if (batchMatch && role === 'agent' && text.includes('Analysis for batch') && text.includes('is complete')) {
+                const batchId = batchMatch[0];
                 content.textContent = text;
                 const link = document.createElement('a');
-                link.href = `/dashboard/${docMatch[0]}`;
+                link.href = `/dashboard/consolidated?batch_id=${batchId}`; // Use consolidated dashboard with batch_id
                 link.className = 'report-link-btn';
-                link.innerHTML = '<span class="material-symbols-outlined text-xs mr-1">monitoring</span> OPEN INTELLIGENCE DASHBOARD';
+                link.innerHTML = '<span class="material-symbols-outlined text-xs mr-1">monitoring</span> OPEN CONSOLIDATED DASHBOARD';
                 link.target = '_blank';
                 content.appendChild(document.createElement('br'));
                 content.appendChild(link);

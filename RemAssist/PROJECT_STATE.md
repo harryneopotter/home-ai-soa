@@ -266,12 +266,28 @@ chat_history (
 - Model call logs: `logs/model_calls.jsonl`
 - Runtime logs: `/tmp/soa1.log`, `/tmp/webui.log`
 
+### Model Call Logging (JSONL)
+
+Structured logging for all LLM interactions in `logs/model_calls.jsonl`:
+
+| Field | Description |
+|-------|-------------|
+| `timestamp_utc` | ISO 8601 timestamp |
+| `correlation_id` | Unique ID linking request/response pairs (e.g., `req-33a290ddd07b`) |
+| `attempt` | Retry attempt number (1-based, for retry scenarios) |
+| `model_name` | Model identifier (e.g., `NemoAgent:latest`, `phinance-json:latest`) |
+| `prompt_source` | Source identifier (`nemoagent`, `phinance`) |
+| `prompt_type` | `request`, `response`, or `error` |
+| `latency_ms` | Response time in milliseconds |
+| `prompt_preview` | Truncated prompt (redacted by default) |
+| `prompt_hash` | SHA-256 hash for correlation without exposing content |
+
 ### What Gets Logged
 
 | Event | Level | Content |
 |-------|-------|---------|
 | API requests | INFO | Client IP, endpoint, method |
-| Model calls | INFO | Model name, latency, prompt preview |
+| Model calls | INFO | Model name, latency, correlation_id, attempt |
 | [INVOKE] detection | INFO | "Detected [INVOKE:phinance] signal - routing to phinance" |
 | Memory operations | INFO/WARN | Search results, write failures |
 | PDF processing | INFO | Pages processed, transaction count |

@@ -9,6 +9,8 @@ from collections import defaultdict
 import uvicorn
 import os
 import uuid
+import asyncio
+from io import BytesIO
 from datetime import datetime
 import time
 from pathlib import Path
@@ -28,6 +30,11 @@ from utils.errors import (
 )
 from utils.rate_limiter import get_limiter_for_endpoint
 
+
+# Input validation limits
+MAX_MESSAGE_LENGTH = 10000
+MAX_FILE_SIZE = 10 * 1024 * 1024
+MAX_BATCH_ID_LENGTH = 100
 try:
     from home_ai.finance_agent.src import storage as chat_storage
 
@@ -230,6 +237,8 @@ def create_app() -> FastAPI:
         logger.info(
             f"[{client_ip}] /api/chat called with message: {req.message[:50]}..."
         )
+        if len(req.message) > MAX_MESSAGE_LENGTH:
+            raise ValidationError(f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH} characters", "message", req.message[:100])
 
         try:
             if CHAT_STORAGE_AVAILABLE:
@@ -272,6 +281,8 @@ def create_app() -> FastAPI:
         client_ip = request.client.host
         session_id = _get_session_id(request)
         logger.info(f"[{client_ip}] /ask called with query: {req.query[:50]}...")
+        if len(req.query) > MAX_MESSAGE_LENGTH:
+            raise ValidationError(f"Query exceeds maximum length of {MAX_MESSAGE_LENGTH} characters", "query", req.query[:100])
 
         try:
             if not req.query or not isinstance(req.query, str):
@@ -304,6 +315,8 @@ def create_app() -> FastAPI:
         logger.info(
             f"[{client_ip}] /ask-with-tts called with query: {req.query[:50]}..."
         )
+        if len(req.query) > MAX_MESSAGE_LENGTH:
+            raise ValidationError(f"Query exceeds maximum length of {MAX_MESSAGE_LENGTH} characters", "query", req.query[:100])
 
         try:
             result = agent.ask_with_tts(req.query)
@@ -375,9 +388,12 @@ def create_app() -> FastAPI:
         logger.info(f"[{client_ip}] Batch upload requested: {len(files)} files")
 
         processed_files = []
+        agent = SOA1Agent()
         for file in files:
             try:
                 content_bytes = await file.read()
+                if len(content_bytes) > MAX_FILE_SIZE:
+                    raise ValidationError(f"File {file.filename} exceeds maximum size of 10MB", "file", file.filename)
 
                 class _SimpleUpload:
                     def __init__(self, filename: str, content: bytes):
@@ -394,6 +410,8 @@ def create_app() -> FastAPI:
                         "size_kb": round(result.get("file_size_bytes", 0) / 1024, 1),
                         "doc_id": f"doc-{uuid.uuid4().hex[:6]}",
                         "text_preview": result.get("text_preview", ""),
+                        "full_text": result.get("full_text", ""),
+                        "is_apple_card": result.get("is_apple_card", False),
                     }
                 )
             except Exception as e:
@@ -401,13 +419,14 @@ def create_app() -> FastAPI:
 
         batch_id = batch_processor.create_batch(processed_files)
 
+        asyncio.create_task(batch_processor.background_analyze(batch_id, agent))
+
         document_context = {
             "batch_id": batch_id,
             "documents": processed_files,
             "session_id": session_id,
         }
 
-        agent = SOA1Agent()
         agent_result = agent.ask(
             query=f"I just uploaded {len(processed_files)} documents.",
             document_context=document_context,
@@ -656,6 +675,31 @@ def create_app() -> FastAPI:
             },
         )
 
+    @app.post("/api/batch/consent")
+    async def grant_batch_consent(batch_id: str, action: str, request: Request):
+        if len(batch_id) > MAX_BATCH_ID_LENGTH:
+            raise ValidationError(f"Batch ID exceeds maximum length of {MAX_BATCH_ID_LENGTH} characters", "batch_id", batch_id[:50])
+        state = batch_processor.get_batch_state(batch_id)
+        if not state:
+            raise HTTPException(status_code=404, detail="Batch not found")
+
+        if action == "analyze" and state.status == "ready":
+            state.status = "consent_granted"
+
+            preliminary_msg = state.preliminary_insights.get(
+                "summary", "Analyzing your documents now..."
+            )
+
+            asyncio.create_task(agent.analyze_batch(batch_id))
+
+            return {
+                "status": "ANALYZING",
+                "preliminary_insights": preliminary_msg,
+                "interesting_findings": state.interesting_findings,
+            }
+
+        return {"status": state.status}
+
     @app.get("/api/output/{batch_id}/{format}")
     async def get_output(batch_id: str, format: str):
         state = batch_processor.get_batch_state(batch_id)
@@ -694,7 +738,8 @@ def create_app() -> FastAPI:
 
 
 if __name__ == "__main__":
-    with open("config.yaml", "r") as f:
+    config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    with open(config_path, "r") as f:
         cfg = yaml.safe_load(f)
     host = cfg["server"]["host"]
     port = int(cfg["server"]["port"])
