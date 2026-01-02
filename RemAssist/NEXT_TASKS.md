@@ -1,7 +1,7 @@
 # 📋 RemAssist — Unified Task Queue
 *Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-_Last updated: January 1, 2026 (Session 15)_
+_Last updated: January 1, 2026 (Session 16)_
 
 ---
 
@@ -22,7 +22,6 @@ _Last updated: January 1, 2026 (Session 15)_
 - ✅ Phinance model calls now logged to `logs/model_calls.jsonl`
 - ✅ Monitoring Dashboard: `/monitoring` endpoint with system stats, services, GPUs, logs, jobs
 - ✅ **Upload Response Architecture**: LLM-generated upload responses (Session 15)
-- ⚠️ **Known Issue**: Upload response uses hardcoded frontend string instead of LLM response
 
 ---
 
@@ -60,6 +59,22 @@ _Last updated: January 1, 2026 (Session 15)_
 ---
 
 ## 🔜 Potential Next Steps
+
+### 🚀 Progressive Batch Architecture (MAJOR FEATURE)
+**Reference:** `RemAssist/PROGRESSIVE_BATCH_ARCHITECTURE.md`
+
+Complete 5-phase pipeline for batch uploads with parallel processing:
+- [x] **Security Layer** (Priority 1 - required for production)
+  - [x] `soa1/security/pii_redactor.py` - PII detection & redaction
+  - [x] `soa1/security/encrypted_storage.py` - AES-256-GCM encryption
+  - [x] Integrate into existing upload flow
+- [x] **Batch Processing** (Priority 2 - enables better UX)
+  - [x] `soa1/batch_processor.py` - BatchState management
+  - [x] Background analysis task (pre-build Phinance prompt)
+  - [x] Update API endpoints for batch uploads
+- [x] **Output Pre-generation** (Priority 3 - polish)
+  - [x] `soa1/output_generator.py` - Dashboard, PDF, infographic prompts
+  - [x] Phase 4-5 implementation (instant delivery)
 
 ### 7. Security Hardening
 - [ ] Rate limiting on all API endpoints

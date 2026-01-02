@@ -2,6 +2,59 @@
 
 ## 📅 Session History
 
+### January 1, 2026 - Progressive Batch Architecture Implementation (Session 17)
+
+#### 🛠️ Implementation
+- **Security Layer:**
+    - Created `soa1/security/pii_redactor.py`: Implements regex-based PII detection and redaction (Credit Cards, Bank Accounts, SSN, etc.).
+    - Created `soa1/security/encrypted_storage.py`: Implements AES-256-GCM encryption for sensitive data storage.
+    - **Integrated Security Layer** into `home_ai/soa1/pdf_processor.py`: Raw text is now redacted immediately after extraction and encrypted before being returned in the result dictionary.
+- **Batch Processing:**
+    - Created `home_ai/soa1/batch_processor.py`: Implements `BatchState` dataclass and `BatchProcessor` for managing multi-file upload states.
+- **Output Generation:**
+    - Created `home_ai/soa1/output_generator.py`: Implements `OutputGenerator` for pre-generating dashboard JSON, PDF prompts, and infographic prompts.
+- **API Updates:**
+    - Modified `home_ai/soa1/api.py`:
+        - Added `POST /upload-batch` endpoint for multi-file uploads with LLM-driven response.
+        - Added `GET /api/output/{batch_id}/{format}` endpoint for retrieving pre-generated outputs.
+        - Integrated `batch_processor` and `output_generator`.
+
+#### 📝 Files Created/Modified
+- `soa1/security/pii_redactor.py` - NEW
+- `soa1/security/encrypted_storage.py` - NEW
+- `home_ai/soa1/pdf_processor.py` - Integrated PII redaction and encryption
+- `home_ai/soa1/batch_processor.py` - NEW
+- `home_ai/soa1/output_generator.py` - NEW
+- `home_ai/soa1/api.py` - Added batch upload and output endpoints
+
+#### ✅ Verified
+- `pii_redactor.py` unit test: Successfully redacted credit cards, bank accounts, SSNs, emails, and phones.
+- `encrypted_storage.py` unit test: Successfully encrypted and decrypted sensitive strings.
+- `pdf_processor.py` integration: Verified imports and initialization with security layer.
+- `api.py` syntax: Verified with basic checks.
+
+---
+
+### January 1, 2026 - Documentation & Architecture Capture (Session 16)
+
+#### 📄 Documentation Created
+- **New Document:** `RemAssist/PROGRESSIVE_BATCH_ARCHITECTURE.md` — Complete 5-phase progressive batch upload pipeline with security layer (PII redaction, AES-256 encryption), captured from Session 15 discussion
+
+#### 🛠️ Documentation Updates
+- **Fixed `RemAssist/NEXT_TASKS.md`**: Removed contradictory "Known Issue" line (was showing issue as both fixed and unfixed)
+- **Added Progressive Batch Architecture tasks** to NEXT_TASKS.md with proper priority ordering
+- **Updated `home-ai/ARCHITECTURE.md`**: Updated status section from December 2025 to January 2026, added references to new architecture doc
+- **Updated `AGENTS.md`**: Added Architecture Reference Documents section pointing to PROGRESSIVE_BATCH_ARCHITECTURE.md
+
+#### 📝 Files Modified
+- `RemAssist/PROGRESSIVE_BATCH_ARCHITECTURE.md` - NEW comprehensive architecture document
+- `RemAssist/NEXT_TASKS.md` - Fixed contradiction, added batch architecture tasks
+- `RemAssist/History.md` - Session 16 entry
+- `home-ai/ARCHITECTURE.md` - Updated status section
+- `AGENTS.md` - Added architecture reference section
+
+---
+
 ### January 1, 2026 - Upload Response Architecture Fix (Session 15)
 
 #### 📄 Documentation Created

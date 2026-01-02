@@ -10,8 +10,18 @@ from typing import Dict, Any, Optional
 from fastapi import UploadFile, HTTPException
 import PyPDF2
 import requests
+import sys
+from pathlib import Path
+
+security_path = Path(__file__).resolve().parents[2] / "soa1"
+if str(security_path) not in sys.path:
+    sys.path.insert(0, str(security_path))
+
+from security.pii_redactor import PIIRedactor
+from security.encrypted_storage import EncryptedStorage
 
 from utils.logger import get_logger
+
 
 logger = get_logger("pdf_processor")
 
@@ -21,7 +31,11 @@ class SimplePDFProcessor:
 
     def __init__(self, max_pages: int = 10):
         self.max_pages = max_pages
-        logger.info(f"PDF Processor initialized (max {max_pages} pages)")
+        self.redactor = PIIRedactor()
+        self.storage = EncryptedStorage()
+        logger.info(
+            f"PDF Processor initialized (max {max_pages} pages) with Security Layer"
+        )
 
     def extract_text_from_pdf(self, file_path: str) -> str:
         """Extract text from PDF file"""
@@ -37,7 +51,10 @@ class SimplePDFProcessor:
                     page = reader.pages[page_num]
                     text.append(page.extract_text() or "")
 
-                return "\n".join(text)
+                text_content = "\n".join(text)
+                redacted_text, pii_counts = self.redactor.redact(text_content)
+                logger.info(f"PII Redaction complete: {pii_counts}")
+                return redacted_text
 
         except Exception as e:
             logger.error(f"PDF extraction failed: {e}")
@@ -71,8 +88,9 @@ class SimplePDFProcessor:
             # Clean up
             os.unlink(temp_path)
 
-            # Create summary
             word_count = len(text_content.split())
+
+            encrypted_text = self.storage.encrypt(text_content)
 
             return {
                 "status": "success",
@@ -83,6 +101,7 @@ class SimplePDFProcessor:
                 if len(text_content) > 500
                 else text_content,
                 "full_text": text_content,
+                "encrypted_text": encrypted_text,
                 "file_size_bytes": file_size_bytes,
             }
 

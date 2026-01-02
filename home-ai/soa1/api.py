@@ -15,6 +15,8 @@ from pathlib import Path
 
 from agent import SOA1Agent
 from pdf_processor import pdf_processor
+from batch_processor import batch_processor
+from output_generator import output_generator
 from utils.logger import get_logger
 from utils.errors import (
     SOA1Error,
@@ -364,8 +366,59 @@ def create_app() -> FastAPI:
             logger.error(f"[{client_ip}] Audio file error: {e}", exc_info=True)
             raise InternalError(f"Failed to serve audio file: {str(e)}")
 
-    # ==================== PDF Endpoints (Demo) ====================
-    # Consent gate: analysis must be orchestrator-driven.
+    @app.post("/upload-batch")
+    async def upload_batch(
+        files: List[UploadFile] = File(...), request: Request = None
+    ):
+        client_ip = request.client.host if request else "unknown"
+        session_id = _get_session_id(request)
+        logger.info(f"[{client_ip}] Batch upload requested: {len(files)} files")
+
+        processed_files = []
+        for file in files:
+            try:
+                content_bytes = await file.read()
+
+                class _SimpleUpload:
+                    def __init__(self, filename: str, content: bytes):
+                        self.filename = filename
+                        self.file = BytesIO(content)
+
+                result = pdf_processor.process_uploaded_pdf(
+                    _SimpleUpload(file.filename, content_bytes)
+                )
+                processed_files.append(
+                    {
+                        "filename": file.filename,
+                        "pages": result.get("pages_processed", 0),
+                        "size_kb": round(result.get("file_size_bytes", 0) / 1024, 1),
+                        "doc_id": f"doc-{uuid.uuid4().hex[:6]}",
+                        "text_preview": result.get("text_preview", ""),
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Failed to process file {file.filename}: {e}")
+
+        batch_id = batch_processor.create_batch(processed_files)
+
+        document_context = {
+            "batch_id": batch_id,
+            "documents": processed_files,
+            "session_id": session_id,
+        }
+
+        agent = SOA1Agent()
+        agent_result = agent.ask(
+            query=f"I just uploaded {len(processed_files)} documents.",
+            document_context=document_context,
+        )
+
+        return {
+            "status": "SUCCESS",
+            "batch_id": batch_id,
+            "file_count": len(processed_files),
+            "agent_response": agent_result.get("answer", ""),
+        }
 
     @app.post("/upload-pdf")
     async def upload_pdf(file: UploadFile = File(...), request: Request = None):
@@ -602,6 +655,40 @@ def create_app() -> FastAPI:
                 "timestamp": datetime.utcnow().isoformat(),
             },
         )
+
+    @app.get("/api/output/{batch_id}/{format}")
+    async def get_output(batch_id: str, format: str):
+        state = batch_processor.get_batch_state(batch_id)
+        if not state:
+            raise HTTPException(status_code=404, detail="Batch not found")
+
+        if format == "dashboard":
+            if not state.outputs.get("dashboard_json"):
+                state.outputs[
+                    "dashboard_json"
+                ] = await output_generator.generate_dashboard_json(
+                    state.phinance_analysis
+                )
+            return state.outputs["dashboard_json"]
+
+        elif format == "pdf":
+            if not state.outputs.get("pdf_prompt"):
+                state.outputs["pdf_prompt"] = await output_generator.build_pdf_prompt(
+                    state.phinance_analysis
+                )
+            return {"prompt": state.outputs["pdf_prompt"]}
+
+        elif format == "infographic":
+            if not state.outputs.get("infographic_prompt"):
+                state.outputs[
+                    "infographic_prompt"
+                ] = await output_generator.build_infographic_prompt(
+                    state.phinance_analysis
+                )
+            return {"prompt": state.outputs["infographic_prompt"]}
+
+        else:
+            raise HTTPException(status_code=400, detail="Invalid format")
 
     return app
 
