@@ -1,7 +1,7 @@
 # 🏗️ SOA1 Home Assistant - System Architecture
 
 **Version**: 1.1  
-**Last Updated**: January 1, 2026 (Session 15)  
+**Last Updated**: January 2, 2026 (Session 22)  
 **Hardware**: Intel X670 + 2x NVIDIA RTX 5060 Ti (16GB each, 32GB total VRAM)
 
 ---
@@ -363,7 +363,7 @@ Reference: `/home/ryzen/projects/RemAssist/IMPLEMENTATION_GUIDE.md`
 
 - **Total VRAM**: 32GB (2x 16GB)
 - **Platform**: Intel X670
-- **CUDA Version**: 12.6
+- **CUDA Version**: 13.0
 - **Driver**: 580.95.05
 
 ### GPU Allocation Strategy
@@ -682,6 +682,7 @@ def analyze_medical_document(doc: MedicalDocument) -> MedicalInsight:
 2. **Batch Processing**: Progressive 5-phase pipeline for multi-PDF uploads
 3. **Output Pre-generation**: Dashboard, PDF, infographic prompts ready before user asks
 4. Implement remaining specialists (budgeting, knowledge, scheduler)
+- **Hardware Specs**: `/home/ryzen/projects/RemAssist/HARDWARE_SPECS.md` (MUST CHECK for GPU decisions)
 
 ---
 

@@ -85,3 +85,28 @@
 ```
 
 ---
+
+
+### January 2, 2026 - Hardware Specs Documentation (Session 22)
+
+#### 📄 Created Hardware Specs Document
+- **New File**: `RemAssist/HARDWARE_SPECS.md`
+- **Purpose**: Comprehensive hardware reference for AI agents to understand resource limits
+- **Contents**:
+  - System identity (hostname, OS, IP)
+  - CPU specs (i5-12600K, 16 threads)
+  - RAM specs (128 GB DDR5)
+  - GPU specs (2x RTX 5060 Ti, 16GB each)
+  - Current GPU allocation (NemoAgent ~10.7GB, phinance ~10.8GB)
+  - Storage specs (2x 1TB NVMe)
+  - Ollama model inventory
+  - Resource planning matrix with decision guide
+
+#### 📝 Updated Documentation
+- **AGENTS.md**: Added HARDWARE_SPECS.md reference with mandatory GPU check rule
+- **PROJECT_STATE.md**: Updated VRAM figures, added hardware specs reference
+- **home-ai/ARCHITECTURE.md**: Corrected CUDA version (13.0), updated VRAM figures
+
+#### 🎯 Key Decision
+- Agents MUST check HARDWARE_SPECS.md before proposing new models or GPU-intensive features
+- This prevents proposals that exceed available VRAM budget

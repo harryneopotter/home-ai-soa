@@ -34,6 +34,9 @@ Before making ANY changes to the `home-ai/` project, agents MUST read and follow
   
 - **`home-ai/ARCHITECTURE.md`** — Current system architecture
 - **`RemAssist/PROJECT_STATE.md`** — Comprehensive project state snapshot
+- **`RemAssist/HARDWARE_SPECS.md`** — System hardware specs and resource limits
+  - **MUST CHECK** before adding models or GPU-intensive features
+  - Contains VRAM budget, model size limits, resource planning matrix
 
 ---
 
@@ -117,3 +120,5 @@ This creates an institutional memory of issues and solutions for future sessions
 - Do NOT invent new intents
 - Do NOT auto-trigger specialists
 - Do NOT optimize away consent
+
+- **MUST check `RemAssist/HARDWARE_SPECS.md`** before proposing new models or GPU-intensive features

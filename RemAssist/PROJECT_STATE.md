@@ -1,7 +1,7 @@
 # SOA1 Project State - January 2026
 
 **Version**: 2.1  
-**Last Updated**: January 1, 2026 (Session 15)  
+**Last Updated**: January 2, 2026 (Session 22)  
 **Hardware**: Intel X670 + 2x NVIDIA RTX 5060 Ti (16GB each, 32GB total VRAM)
 
 ---
@@ -441,6 +441,8 @@ tail -f /home/ryzen/projects/soa-webui/logs/soa-webui.log
 - `RemAssist/errors.md` - Error tracking log
 - `home-ai/ARCHITECTURE.md` - Detailed system architecture
 - `AGENTS.md` - AI agent guidelines
+
+- `RemAssist/HARDWARE_SPECS.md` - System hardware specs (MUST CHECK for GPU decisions)
 
 ---
 
