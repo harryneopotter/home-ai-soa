@@ -25,6 +25,18 @@ Before making ANY changes to the `home-ai/` project, agents MUST read and follow
 
 ---
 
+## 📐 Architecture Reference Documents
+
+- **`RemAssist/PROGRESSIVE_BATCH_ARCHITECTURE.md`** — Next major feature: 5-phase batch upload pipeline
+  - Parallel processing, background analysis, output pre-generation
+  - Security layer with PII redaction and AES-256 encryption
+  - Implementation roadmap and code examples
+  
+- **`home-ai/ARCHITECTURE.md`** — Current system architecture
+- **`RemAssist/PROJECT_STATE.md`** — Comprehensive project state snapshot
+
+---
+
 ## ⚠️ Critical Design Decisions
 
 ### Orchestrator = Model-Agnostic (NO Modelfile)

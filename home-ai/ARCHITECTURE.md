@@ -662,7 +662,7 @@ def analyze_medical_document(doc: MedicalDocument) -> MedicalInsight:
 - **Local-First**: Privacy-focused, no cloud dependencies
 - **Resource-Aware**: Intelligent GPU allocation, 32GB VRAM total
 
-**Current Status** (December 26, 2025):
+**Current Status** (January 1, 2026):
 - ✅ Finance specialist operational (phinance-json)
 - ✅ Consent framework implemented
 - ✅ PDF parsing pipeline working
@@ -670,15 +670,18 @@ def analyze_medical_document(doc: MedicalDocument) -> MedicalInsight:
 - ✅ Per-step timing instrumentation
 - ✅ Monitoring dashboard at /monitoring
 - ✅ Dashboard JSON converter integrated
-- ⚠️ Orchestrator needs model-agnostic system prompt (soa1/prompts/orchestrator.md)
+- ✅ Orchestrator system prompt at `soa1/prompts/orchestrator.md`
+- ✅ SQLite persistence for transactions
+- ✅ LLM-driven responses (all user-facing text from agent)
+- ✅ Chat history persistence with multi-turn context
+- ✅ Cross-document comparison and merchant normalization
 - ⏳ Other specialists planned but not implemented
 
 **Next Steps**:
-1. Create orchestrator.md system prompt (model-agnostic)
-2. Implement SQLite persistence for transactions
-3. Add model verification endpoint
-4. Test orchestrator routing with multiple scenarios
-5. Implement remaining specialists (budgeting, knowledge, scheduler)
+1. **Security Layer**: PII redaction + encrypted storage (see `RemAssist/PROGRESSIVE_BATCH_ARCHITECTURE.md`)
+2. **Batch Processing**: Progressive 5-phase pipeline for multi-PDF uploads
+3. **Output Pre-generation**: Dashboard, PDF, infographic prompts ready before user asks
+4. Implement remaining specialists (budgeting, knowledge, scheduler)
 
 ---
 
