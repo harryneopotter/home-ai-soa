@@ -4,12 +4,15 @@ from datetime import datetime
 import os, pathlib
 import re
 import json
+import time
 
 from memory import MemoryClient
 from model import ModelClient
 
 # TTS disabled for now
 # from tts_service import tts_service
+from batch_processor import batch_processor
+from output_generator import output_generator
 from utils.logger import get_logger
 from utils.errors import ValidationError, ServiceError, InternalError
 
@@ -285,6 +288,28 @@ class SOA1Agent:
     # ---------------------------------------------------------
     # Main Agent Logic
     # ---------------------------------------------------------
+    async def analyze_preliminary(self, batch_id: str):
+        state = batch_processor.get_batch_state(batch_id)
+        if not state:
+            return
+
+        all_text = ""
+        for doc in state.files:
+            all_text += doc.get("text_preview", "") + "\n"
+
+        prompt = (
+            f"Analyze these documents and provide preliminary insights:\n{all_text}"
+        )
+        convo = [{"role": "user", "content": prompt}]
+
+        try:
+            response = self.model.chat(self.system_prompt, convo)
+            state.preliminary_insights = {"summary": response}
+            state.status = "ready"
+            state.analysis_ready_at = time.time()
+        except Exception as e:
+            logger.error(f"Preliminary analysis failed: {e}")
+
     def ask(
         self,
         query: str,
