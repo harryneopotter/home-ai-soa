@@ -21,6 +21,7 @@ from typing import Optional, Dict, List, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import json
+import uuid
 from pydantic import BaseModel
 
 # Set up logging
@@ -317,15 +318,19 @@ def home(request: Request):
 
 
 @app.get("/dashboard/{doc_id}")
-def analysis_dashboard(request: Request, doc_id: str):
+def analysis_dashboard(request: Request, doc_id: str, style: Optional[str] = None):
     """Detailed Analysis Dashboard for a specific document"""
     client_ip = request.client.host
 
     if not check_access(client_ip):
         raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
 
+    template_name = "analysis_dashboard.html"
+    if style == "soa":
+        template_name = "soa_dashboard.html"
+
     return templates.TemplateResponse(
-        "analysis_dashboard.html",
+        template_name,
         {
             "request": request,
             "doc_id": doc_id,
@@ -604,9 +609,128 @@ def _run_phinance_analysis(job: Dict[str, Any], pdf_path: str):
         with open(reports_dir / "transactions.json", "w") as f:
             json.dump(transactions, f, indent=2, default=str)
 
-        if result.phinance_structured_response:
+        try:
+            import sys
+
+            sys.path.insert(0, "/home/ryzen/projects/home-ai/soa1")
+            from utils.financial_calculator import (
+                calculate_financials,
+                build_insights_prompt,
+                merge_calculated_with_llm_response,
+                strip_markdown_fences,
+            )
+            from models import call_insights_model
+
+            calculated = calculate_financials(transactions)
+            logger.info(
+                f"Hybrid calc: total=${calculated['total_spent']}, "
+                f"drains={len(calculated.get('hidden_drains', []))}"
+            )
+
+            insights_prompt = build_insights_prompt(transactions, calculated)
+            raw_response = call_insights_model(insights_prompt)
+
+            try:
+                cleaned = strip_markdown_fences(raw_response)
+                llm_insights = json.loads(cleaned)
+            except json.JSONDecodeError:
+                llm_insights = {
+                    "insights": [],
+                    "recommendations": [],
+                    "potential_savings": 0,
+                    "verified_drains": [],
+                }
+
+            analysis = merge_calculated_with_llm_response(calculated, llm_insights)
+            analysis["doc_id"] = doc_id
+            analysis["currency"] = "USD"
+
             with open(reports_dir / "analysis.json", "w") as f:
-                json.dump(result.phinance_structured_response, f, indent=2, default=str)
+                json.dump(analysis, f, indent=2, default=str)
+            logger.info(
+                f"Saved hybrid analysis with {len(analysis.get('hidden_drains', []))} hidden drains"
+            )
+
+        except Exception as hybrid_err:
+            logger.warning(
+                f"Hybrid calculation failed, falling back to parser output: {hybrid_err}"
+            )
+            if result.phinance_structured_response:
+                with open(reports_dir / "analysis.json", "w") as f:
+                    json.dump(
+                        result.phinance_structured_response, f, indent=2, default=str
+                    )
+
+        job["status"] = "completed"
+        job["completed_at"] = datetime.utcnow().isoformat()
+        job["transaction_count"] = len(transactions)
+        job["reports_dir"] = str(reports_dir)
+
+        _save_job(job)
+        logger.info(
+            f"Analysis completed for {doc_id}: {len(transactions)} transactions"
+        )
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        with open(reports_dir / "transactions.json", "w") as f:
+            json.dump(transactions, f, indent=2, default=str)
+
+        # Use hybrid calculation pipeline: Python calculates + LLM insights
+        try:
+            import sys
+
+            sys.path.insert(0, "/home/ryzen/projects/home-ai/soa1")
+            from utils.financial_calculator import (
+                calculate_financials,
+                build_insights_prompt,
+                merge_calculated_with_llm_response,
+                strip_markdown_fences,
+            )
+            from models import call_insights_model
+
+            # Python calculates accurate numbers
+            calculated = calculate_financials(transactions)
+            logger.info(
+                f"Hybrid calc: total=${calculated['total_spent']}, "
+                f"drains={len(calculated.get('hidden_drains', []))}"
+            )
+
+            # LLM provides qualitative insights
+            insights_prompt = build_insights_prompt(transactions, calculated)
+            raw_response = call_insights_model(insights_prompt)
+
+            try:
+                cleaned = strip_markdown_fences(raw_response)
+                llm_insights = json.loads(cleaned)
+            except json.JSONDecodeError:
+                llm_insights = {
+                    "insights": [],
+                    "recommendations": [],
+                    "potential_savings": 0,
+                    "verified_drains": [],
+                }
+
+            # Merge: accurate numbers + LLM insights
+            analysis = merge_calculated_with_llm_response(calculated, llm_insights)
+            analysis["doc_id"] = doc_id
+            analysis["currency"] = "USD"
+
+            with open(reports_dir / "analysis.json", "w") as f:
+                json.dump(analysis, f, indent=2, default=str)
+            logger.info(
+                f"Saved hybrid analysis with {len(analysis.get('hidden_drains', []))} hidden drains"
+            )
+
+        except Exception as hybrid_err:
+            logger.warning(
+                f"Hybrid calculation failed, falling back to parser output: {hybrid_err}"
+            )
+            # Fallback to parser's structured response if hybrid fails
+            if result.phinance_structured_response:
+                with open(reports_dir / "analysis.json", "w") as f:
+                    json.dump(
+                        result.phinance_structured_response, f, indent=2, default=str
+                    )
 
         job["status"] = "completed"
         job["completed_at"] = datetime.utcnow().isoformat()
@@ -969,6 +1093,66 @@ async def api_proxy_upload(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Upload proxy error: {e}")
         return {"status": "error", "message": f"Proxy upload failed: {str(e)}"}
+
+
+@app.post("/api/proxy/upload-batch")
+async def api_proxy_upload_batch(files: List[UploadFile] = File(...)):
+    """Proxy batch file upload to SOA1 API's /upload-batch endpoint."""
+    try:
+        soa1_url = config.services.get("api", "http://localhost:8001")
+
+        files_to_send = []
+        for file in files:
+            content = await file.read()
+            files_to_send.append(
+                (
+                    "files",
+                    (file.filename, content, file.content_type or "application/pdf"),
+                )
+            )
+
+        resp = requests.post(
+            f"{soa1_url}/upload-batch", files=files_to_send, timeout=120
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Batch upload proxy error: {e}")
+        return {
+            "status": "ERROR",
+            "error": str(e),
+            "agent_response": f"Failed to upload files: {str(e)}",
+        }
+    except Exception as e:
+        logger.error(f"Batch upload proxy error: {e}")
+        return {
+            "status": "ERROR",
+            "error": str(e),
+            "agent_response": f"Failed to upload files: {str(e)}",
+        }
+    except Exception as e:
+        logger.error(f"Batch upload proxy error: {e}")
+        return {"status": "error", "message": f"Batch upload failed: {str(e)}"}
+
+
+_batch_status: Dict[str, Dict[str, Any]] = {}
+
+
+@app.get("/api/batch/status")
+async def get_batch_status(batch_id: str):
+    """Proxy batch status request to SOA1 API."""
+    soa1_url = config.services.get("api", "http://localhost:8001")
+
+    try:
+        resp = requests.get(f"{soa1_url}/api/batch/status/{batch_id}", timeout=10)
+        if resp.status_code == 404:
+            return {"status": "not_found", "batch_id": batch_id}
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to get batch status from SOA1: {e}")
+        return {"status": "error", "batch_id": batch_id, "error": str(e)}
 
 
 # =============================================================================

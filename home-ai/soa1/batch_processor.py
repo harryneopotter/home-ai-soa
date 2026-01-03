@@ -2,7 +2,7 @@ import time
 import uuid
 import asyncio
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 
 
 @dataclass
@@ -38,6 +38,43 @@ class BatchState:
 class BatchProcessor:
     def __init__(self):
         self.batches: Dict[str, BatchState] = {}
+        self._on_status_change: Optional[Callable[[str, str], None]] = None
+
+    def set_status_callback(self, callback: Callable[[str, str], None]):
+        self._on_status_change = callback
+
+    def hydrate_from_db(self, storage_module) -> int:
+        """Restore incomplete batches from database on startup. Returns count hydrated."""
+        try:
+            incomplete = storage_module.get_incomplete_batches()
+            count = 0
+            for batch_record in incomplete:
+                batch_id = batch_record["batch_id"]
+                if batch_id in self.batches:
+                    continue
+
+                batch_full = storage_module.get_batch_full(batch_id)
+                if not batch_full:
+                    continue
+
+                extracted_text = batch_full.get("extracted_text", "")
+                phinance_analysis = batch_full.get("phinance_analysis")
+
+                state = BatchState(
+                    batch_id=batch_id,
+                    status=batch_full.get("status", "ready"),
+                    files=[{"full_text": extracted_text}] if extracted_text else [],
+                )
+                state.phinance_prompt = extracted_text
+                if phinance_analysis:
+                    state.phinance_analysis = phinance_analysis
+                    state.status = "complete"
+
+                self.batches[batch_id] = state
+                count += 1
+            return count
+        except Exception:
+            return 0
 
     def create_batch(self, files: List[Dict]) -> str:
         batch_id = f"batch-{uuid.uuid4().hex[:8]}"
@@ -56,12 +93,18 @@ class BatchProcessor:
             elif status == "complete":
                 self.batches[batch_id].phinance_complete_at = time.time()
 
+            if self._on_status_change:
+                try:
+                    self._on_status_change(batch_id, status)
+                except Exception:
+                    pass
+
     async def background_analyze(self, batch_id: str, agent: Any):
         state = self.get_batch_state(batch_id)
         if not state:
             return
 
-        state.status = "analyzing"
+        self.update_batch_status(batch_id, "analyzing")
 
         all_text = ""
         for doc in state.files:
@@ -87,11 +130,10 @@ class BatchProcessor:
             if is_apple_card_batch:
                 state.phinance_prompt = f"[FORMAT:APPLE_CARD]\n{full_text}"
 
-            state.status = "ready"
-            state.analysis_ready_at = time.time()
+            self.update_batch_status(batch_id, "ready")
 
         except Exception as e:
-            state.status = "failed"
+            self.update_batch_status(batch_id, "failed")
             print(f"Background analysis failed for {batch_id}: {e}")
 
     async def pre_generate_outputs(self, batch_id: str, generator: Any):

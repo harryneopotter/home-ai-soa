@@ -41,6 +41,12 @@ DEFAULT_MODELS = {
         "temperature": 0.1,
         "max_tokens": 768,
     },
+    "insights": {
+        "base_url": "http://localhost:11434",
+        "model_name": "qwen2.5:7b-instruct",
+        "temperature": 0.3,
+        "max_tokens": 1024,
+    },
 }
 
 
@@ -51,6 +57,7 @@ class ModelEndpoint:
     model_name: str
     temperature: float
     max_tokens: int
+    system_prompt: Optional[str] = None
 
     @property
     def chat_url(self) -> str:
@@ -60,6 +67,9 @@ class ModelEndpoint:
 
 def _load_model_endpoints() -> Dict[str, ModelEndpoint]:
     models_cfg = DEFAULT_MODELS
+    # Initialize config-based overrides
+    finance_system_prompt = None
+
     if CONFIG_PATH.exists():
         with CONFIG_PATH.open("r", encoding="utf-8") as fh:
             cfg = yaml.safe_load(fh) or {}
@@ -70,6 +80,7 @@ def _load_model_endpoints() -> Dict[str, ModelEndpoint]:
             DEFAULT_MODELS["phinance"]["model_name"] = finance_cfg.get(
                 "model_name", DEFAULT_MODELS["phinance"]["model_name"]
             )
+            finance_system_prompt = finance_cfg.get("system_prompt")
 
         orchestrator_cfg = cfg.get("orchestrator", {})
         if orchestrator_cfg:
@@ -80,9 +91,12 @@ def _load_model_endpoints() -> Dict[str, ModelEndpoint]:
         models_cfg = cfg.get("models", DEFAULT_MODELS) or DEFAULT_MODELS
 
     endpoints: Dict[str, ModelEndpoint] = {}
-    for key in ("nemotron", "phinance"):
+    for key in ("nemotron", "phinance", "insights"):
         raw = models_cfg.get(key, {})
         merged = {**DEFAULT_MODELS[key], **raw}
+
+        sys_prompt = finance_system_prompt if key == "phinance" else None
+
         endpoints[key] = ModelEndpoint(
             name=key,
             base_url=merged["base_url"],
@@ -91,6 +105,7 @@ def _load_model_endpoints() -> Dict[str, ModelEndpoint]:
                 merged.get("temperature", DEFAULT_MODELS[key]["temperature"])
             ),
             max_tokens=int(merged.get("max_tokens", DEFAULT_MODELS[key]["max_tokens"])),
+            system_prompt=sys_prompt,
         )
     return endpoints
 
@@ -108,81 +123,134 @@ def call_nemotron(prompt: str) -> str:
     return _dispatch_request(endpoint, payload)
 
 
+def call_insights_model(prompt: str) -> str:
+    """Call qwen2.5:7b-instruct for qualitative financial insights.
+
+    This model generates insights, recommendations, and observations
+    from pre-calculated financial data. It does NOT do arithmetic.
+
+    Args:
+        prompt: Pre-formatted insights prompt with calculated numbers
+
+    Returns:
+        JSON string with insights, recommendations, potential_savings
+    """
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("Insights prompt must be a non-empty string")
+
+    endpoint = _ENDPOINTS["insights"]
+    payload = _build_chat_payload(endpoint, prompt)
+    return _dispatch_request(endpoint, payload, prompt_source="insights")
+
+
+def _calculate_stats(transactions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Deterministically calculate financial statistics from transactions."""
+    total_spent = 0.0
+    total_income = 0.0
+    categories = {}
+    merchants = {}
+    
+    for t in transactions:
+        amt = float(t.get("amount", 0.0))
+        if amt > 0:
+            total_spent += amt
+        else:
+            total_income += abs(amt)
+            
+        cat = t.get("category", "Other")
+        categories[cat] = categories.get(cat, 0.0) + abs(amt)
+        
+        m = t.get("merchant", "Unknown")
+        merchants[m] = merchants.get(m, 0.0) + abs(amt)
+
+    # Top 5 Merchants
+    top_merchants = [
+        {"merchant": k, "total": round(v, 2)}
+        for k, v in sorted(merchants.items(), key=lambda x: x[1], reverse=True)[:5]
+    ]
+    
+    # Hidden Drains (Under $50, 3+ times)
+    drain_candidates = {}
+    for t in transactions:
+        m = t.get("merchant", "Unknown")
+        amt = abs(float(t.get("amount", 0.0)))
+        if amt < 50:
+            if m not in drain_candidates:
+                drain_candidates[m] = []
+            drain_candidates[m].append(amt)
+            
+    hidden_drains = []
+    for m, amts in drain_candidates.items():
+        if len(amts) >= 3:
+            avg = sum(amts) / len(amts)
+            hidden_drains.append({
+                "merchant": m,
+                "avg_amount": round(avg, 2),
+                "frequency": len(amts),
+                "annual_cost": round(sum(amts) * 12 / (len(amts)/3), 2) # simplified annualization
+            })
+
+    return {
+        "total_spent": round(total_spent, 2),
+        "total_income": round(total_income, 2),
+        "categories": {k: round(v, 2) for k, v in categories.items()},
+        "top_merchants": top_merchants,
+        "hidden_drains": hidden_drains
+    }
+
+
 def call_phinance(
     payload_json: str,
     validate: bool = False,
     retry_config: Optional[RetryConfig] = None,
 ) -> Tuple[str, int]:
-    """Send structured JSON (USD) payload to Phinance for finance analysis.
+    """Send pre-calculated stats to the Insight Analyst (powered by qwen2.5).
 
     Args:
-        payload_json: JSON string with transaction data
-        validate: If True, validates response schema (raises LLMValidationError on failure)
-        retry_config: If provided, enables retry with feedback on validation failure
+        payload_json: JSON string with pre-calculated stats.
+        validate: If True, validates response schema.
+        retry_config: If provided, enables retry with feedback.
 
     Returns:
-        Tuple of (Raw LLM response string, number of attempts made)
+        Tuple of (Analysis JSON string, number of attempts)
     """
 
     if not isinstance(payload_json, str) or not payload_json.strip():
         raise ValueError("Phinance payload must be a JSON string")
 
     try:
-        payload_dict = json.loads(payload_json)
+        stats = json.loads(payload_json)
     except json.JSONDecodeError as exc:
         raise ValueError("Phinance payload must be valid JSON") from exc
 
-    payload_dict.setdefault("currency", "USD")
+    # INSIGHT ENGINE: Use qwen2.5 for superior reasoning
+    endpoint = _ENDPOINTS["insights"]
+    
+    # INSIGHT PROMPT: Use pre-calculated Python facts
+    insight_prompt = (
+        f"Analyze these pre-calculated statistics and provide professional financial insights:\n"
+        f"TOTAL SPENT: ${stats.get('total_spent', 0.0)}\n"
+        f"CATEGORIES: {json.dumps(stats.get('categories', {}))}\n"
+        f"TOP MERCHANTS: {json.dumps(stats.get('top_merchants', []))}\n"
+        f"HIDDEN DRAINS: {json.dumps(stats.get('hidden_drains', []))}\n\n"
+        f"Provide 3-5 specific qualitative insights and 2-3 actionable recommendations."
+    )
 
-    endpoint = _ENDPOINTS["phinance"]
-
-    is_apple_card = False
-    text_content = payload_dict.get("text", "")
-    if isinstance(text_content, str) and "[FORMAT:APPLE_CARD]" in text_content:
-        is_apple_card = True
-        text_content = text_content.replace("[FORMAT:APPLE_CARD]\n", "", 1).replace(
-            "[FORMAT:APPLE_CARD]", "", 1
-        )
-        payload_dict["text"] = text_content
-        logger.info("Apple Card format detected - using specialized extraction prompt")
-
-    sanitized = json.dumps(payload_dict)
-
-    base_prompt = f"Analyze the following finance payload in USD. Respond with structured JSON.\n{sanitized}"
-    if is_apple_card:
-        base_prompt = (
-            "You are analyzing an Apple Card statement. Extract ALL transactions from the text.\n\n"
-            "The statement contains:\n"
-            "1. A 'Payments' section with ACH deposits (negative amounts = payments made)\n"
-            "2. A 'Transactions' section with purchases (columns: Date, Description, Daily Cash, Amount)\n\n"
-            "Extract each transaction with:\n"
-            "- date: The transaction date (format: MM/DD/YYYY)\n"
-            "- merchant: The merchant/description\n"
-            "- amount: The dollar amount (positive for purchases, negative for payments)\n"
-            "- category: Infer category from merchant name (e.g., 'Groceries', 'Utilities', 'Shopping', 'Dining', 'Gas', 'Services', 'Other')\n\n"
-            "Also provide:\n"
-            "- total_spent: Sum of all purchase amounts (positive transactions only)\n"
-            "- total_payments: Sum of all payment amounts (absolute value of negative transactions)\n"
-            "- categories: Breakdown by category with totals\n"
-            "- insights: 2-3 observations about spending patterns\n\n"
-            "Respond with valid JSON in this schema:\n"
-            "{\n"
-            '  "transactions": [{"date": "...", "merchant": "...", "amount": 0.00, "category": "..."}],\n'
-            '  "total_spent": 0.00,\n'
-            '  "total_payments": 0.00,\n'
-            '  "categories": {"category_name": 0.00},\n'
-            '  "insights": ["...", "..."]\n'
-            "}\n\n"
-            f"Statement text:\n{text_content}"
-        )
-
-    # If no retry config, single attempt
-    if retry_config is None:
-        model_payload = _build_chat_payload(endpoint, base_prompt)
-        response = _dispatch_request(endpoint, model_payload, prompt_source="phinance", attempt=1)
-        if validate:
-            validate_phinance_response(response)
-        return response, 1
+    model_payload = _build_chat_payload(endpoint, insight_prompt)
+    raw_response = _dispatch_request(endpoint, model_payload, prompt_source="phinance")
+    
+    try:
+        # ROBUST EXTRACTION: Use helper to strip chatter/markdown
+        from utils.llm_validation import extract_json_from_response
+        clean_json_str = extract_json_from_response(raw_response)
+        model_json = json.loads(clean_json_str)
+        
+        # Final output is the MERGE of Python facts and AI insights
+        final_result = {**stats, **model_json}
+        return json.dumps(final_result), 1
+    except Exception as e:
+        logger.warning(f"Failed to parse insights: {e}")
+        return json.dumps({**stats, "insights": ["Qualitative insights currently unavailable."], "recommendations": []}), 1
 
     # Retry loop with validation feedback
     last_error: Optional[LLMValidationError] = None
@@ -204,7 +272,9 @@ def call_phinance(
             prompt = build_retry_prompt(base_prompt, context, retry_config)
 
         model_payload = _build_chat_payload(endpoint, prompt)
-        response = _dispatch_request(endpoint, model_payload, prompt_source="phinance", attempt=1)
+        response = _dispatch_request(
+            endpoint, model_payload, prompt_source="phinance", attempt=1
+        )
         last_response = response
 
         # Validate if requested
@@ -280,9 +350,15 @@ def validate_phinance_response(raw_response: str) -> None:
 
 
 def _build_chat_payload(endpoint: ModelEndpoint, user_content: str) -> Dict:
+    # Prepare the user content. If a system_prompt exists in config, prepend it
+    # as instructions to the user message to keep it additive to the Modelfile's SYSTEM.
+    final_user_content = user_content
+    if endpoint.system_prompt:
+        final_user_content = f"### ADDITIONAL INSTRUCTIONS:\n{endpoint.system_prompt}\n\n### DATA TO ANALYZE:\n{user_content}"
+
     return {
         "model": endpoint.model_name,
-        "messages": [{"role": "user", "content": user_content}],
+        "messages": [{"role": "user", "content": final_user_content}],
         "options": {
             "temperature": endpoint.temperature,
             "num_predict": endpoint.max_tokens,
@@ -302,7 +378,7 @@ def _dispatch_request(
     attempt: Optional[int] = None,
 ) -> str:
     """Dispatch request to model endpoint with structured logging.
-    
+
     Args:
         endpoint: Model endpoint configuration
         payload: Request payload

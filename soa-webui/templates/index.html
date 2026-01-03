@@ -316,23 +316,48 @@
                     const response = await fetch(`/api/batch/status?batch_id=${batchId}`);
                     const data = await response.json();
                     const status = data.status;
-                    const outputsReady = data.outputs_ready;
                     
                     statusEl.textContent = `BATCH ${batchId} STATUS: ${status.toUpperCase()}`;
                     
-                    if (status === 'complete' && outputsReady) {
+                    if (status === 'ready') {
                         clearInterval(interval);
-                        statusEl.textContent = `ANALYSIS COMPLETE: ${totalFiles} files processed.`;
-                        statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-green text-accent-green';
+                        statusEl.textContent = `BATCH READY: Awaiting your consent to analyze.`;
+                        statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-neon-orange text-accent-neon-orange';
                         
-                        // Append final message with dashboard link
-                        appendMessage('agent', `✅ Analysis for batch ${batchId} is complete. You can now view the consolidated dashboard.`);
+                        const insights = data.preliminary_insights || {};
+                        const txCount = data.transaction_count || 0;
+                        const findings = data.interesting_findings || [];
                         
+                        let msg = `I've processed ${totalFiles} documents and found ${txCount} transactions.\n\n`;
+                        if (findings.length > 0) {
+                            msg += `**Quick observations:**\n`;
+                            findings.slice(0, 3).forEach(f => { msg += `• ${f}\n`; });
+                            msg += `\n`;
+                        }
+                        msg += `Would you like me to run a detailed analysis? Just say "yes" or "analyze".`;
+                        
+                        appendMessage('agent', msg);
                         btn.disabled = false;
                         btn.textContent = 'UPLOAD BATCH';
+                        
+                    } else if (status === 'complete' || status === 'consent_granted') {
+                        if (data.outputs_ready) {
+                            clearInterval(interval);
+                            statusEl.textContent = `ANALYSIS COMPLETE: ${totalFiles} files processed.`;
+                            statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-green text-accent-green';
+                            appendMessage('agent', `✅ Analysis complete. You can now view the consolidated dashboard or ask questions about your spending.`);
+                            btn.disabled = false;
+                            btn.textContent = 'UPLOAD BATCH';
+                        }
                     } else if (status === 'failed') {
                         clearInterval(interval);
                         statusEl.textContent = `ANALYSIS FAILED. Check logs.`;
+                        statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
+                        btn.disabled = false;
+                        btn.textContent = 'UPLOAD BATCH';
+                    } else if (status === 'not_found' || status === 'error') {
+                        clearInterval(interval);
+                        statusEl.textContent = `BATCH ERROR: ${data.error || 'Not found'}`;
                         statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
                         btn.disabled = false;
                         btn.textContent = 'UPLOAD BATCH';
@@ -344,7 +369,7 @@
                     btn.disabled = false;
                     btn.textContent = 'UPLOAD BATCH';
                 }
-            }, 3000); // Poll every 3 seconds
+            }, 2000);
         }
 
         function handleEnter(e) {

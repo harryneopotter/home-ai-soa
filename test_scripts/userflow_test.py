@@ -25,7 +25,7 @@ TEST_LOG_DIR = Path("/home/ryzen/projects/test_logs")
 TEST_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 SAMPLE_PDF = Path(
-    "/home/ryzen/projects/home-ai/finance-agent/data/uploads/finance-20251224-153218-4de4ed_Apple Card Statement - September 2025.pdf"
+    "/home/ryzen/projects/home-ai/finance-agent/data/uploads/finance-20251231-135146-d632a5_Apple Card Statement - April 2025.pdf"
 )
 
 

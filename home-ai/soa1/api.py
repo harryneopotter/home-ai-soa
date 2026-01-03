@@ -46,6 +46,26 @@ logger = get_logger("api")
 
 _pending_documents: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
+_document_parse_status: Dict[str, Dict[str, Any]] = {}
+
+if CHAT_STORAGE_AVAILABLE:
+
+    def _persist_batch_status(batch_id: str, status: str):
+        try:
+            chat_storage.update_batch_status(batch_id, status)
+        except Exception as e:
+            logger.warning(f"Failed to persist batch status: {e}")
+
+    batch_processor.set_status_callback(_persist_batch_status)
+
+    try:
+        chat_storage.init_db()
+        hydrated = batch_processor.hydrate_from_db(chat_storage)
+        if hydrated > 0:
+            logger.info(f"Hydrated {hydrated} batches from database")
+    except Exception as e:
+        logger.warning(f"Failed to hydrate batches from DB: {e}")
+
 
 def _get_session_id(request: Request) -> str:
     session_id = request.headers.get("X-Session-ID")
@@ -238,7 +258,11 @@ def create_app() -> FastAPI:
             f"[{client_ip}] /api/chat called with message: {req.message[:50]}..."
         )
         if len(req.message) > MAX_MESSAGE_LENGTH:
-            raise ValidationError(f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH} characters", "message", req.message[:100])
+            raise ValidationError(
+                f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH} characters",
+                "message",
+                req.message[:100],
+            )
 
         try:
             if CHAT_STORAGE_AVAILABLE:
@@ -282,7 +306,11 @@ def create_app() -> FastAPI:
         session_id = _get_session_id(request)
         logger.info(f"[{client_ip}] /ask called with query: {req.query[:50]}...")
         if len(req.query) > MAX_MESSAGE_LENGTH:
-            raise ValidationError(f"Query exceeds maximum length of {MAX_MESSAGE_LENGTH} characters", "query", req.query[:100])
+            raise ValidationError(
+                f"Query exceeds maximum length of {MAX_MESSAGE_LENGTH} characters",
+                "query",
+                req.query[:100],
+            )
 
         try:
             if not req.query or not isinstance(req.query, str):
@@ -316,7 +344,11 @@ def create_app() -> FastAPI:
             f"[{client_ip}] /ask-with-tts called with query: {req.query[:50]}..."
         )
         if len(req.query) > MAX_MESSAGE_LENGTH:
-            raise ValidationError(f"Query exceeds maximum length of {MAX_MESSAGE_LENGTH} characters", "query", req.query[:100])
+            raise ValidationError(
+                f"Query exceeds maximum length of {MAX_MESSAGE_LENGTH} characters",
+                "query",
+                req.query[:100],
+            )
 
         try:
             result = agent.ask_with_tts(req.query)
@@ -393,7 +425,11 @@ def create_app() -> FastAPI:
             try:
                 content_bytes = await file.read()
                 if len(content_bytes) > MAX_FILE_SIZE:
-                    raise ValidationError(f"File {file.filename} exceeds maximum size of 10MB", "file", file.filename)
+                    raise ValidationError(
+                        f"File {file.filename} exceeds maximum size of 10MB",
+                        "file",
+                        file.filename,
+                    )
 
                 class _SimpleUpload:
                     def __init__(self, filename: str, content: bytes):
@@ -403,12 +439,24 @@ def create_app() -> FastAPI:
                 result = pdf_processor.process_uploaded_pdf(
                     _SimpleUpload(file.filename, content_bytes)
                 )
+                doc_id = f"doc-{uuid.uuid4().hex[:6]}"
+                file_size_bytes = result.get("file_size_bytes", 0)
+                pages = result.get("pages_processed", 0)
+
+                if CHAT_STORAGE_AVAILABLE:
+                    try:
+                        chat_storage.save_document(
+                            doc_id, file.filename, pages, file_size_bytes
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to save document {doc_id}: {e}")
+
                 processed_files.append(
                     {
                         "filename": file.filename,
-                        "pages": result.get("pages_processed", 0),
-                        "size_kb": round(result.get("file_size_bytes", 0) / 1024, 1),
-                        "doc_id": f"doc-{uuid.uuid4().hex[:6]}",
+                        "pages": pages,
+                        "size_kb": round(file_size_bytes / 1024, 1),
+                        "doc_id": doc_id,
                         "text_preview": result.get("text_preview", ""),
                         "full_text": result.get("full_text", ""),
                         "is_apple_card": result.get("is_apple_card", False),
@@ -418,6 +466,21 @@ def create_app() -> FastAPI:
                 logger.error(f"Failed to process file {file.filename}: {e}")
 
         batch_id = batch_processor.create_batch(processed_files)
+        doc_ids = [f.get("doc_id") for f in processed_files if f.get("doc_id")]
+
+        combined_text = "\n".join(
+            f.get("full_text", f.get("text_preview", "")) for f in processed_files
+        )
+
+        if CHAT_STORAGE_AVAILABLE:
+            try:
+                chat_storage.save_batch(
+                    batch_id, session_id, "uploading", len(processed_files), doc_ids
+                )
+                if combined_text:
+                    chat_storage.save_batch_extracted_text(batch_id, combined_text)
+            except Exception as e:
+                logger.warning(f"Failed to persist batch to DB: {e}")
 
         asyncio.create_task(batch_processor.background_analyze(batch_id, agent))
 
@@ -439,14 +502,89 @@ def create_app() -> FastAPI:
             "agent_response": agent_result.get("answer", ""),
         }
 
+    async def _background_full_parse(doc_id: str, dest_path: str, filename: str):
+        """Background task: performs full PDF parsing after quick response is sent."""
+
+        def _do_parse():
+            from io import BytesIO
+
+            with open(dest_path, "rb") as f:
+                content_bytes = f.read()
+
+            class _SimpleUpload:
+                def __init__(self, fname: str, content: bytes):
+                    self.filename = fname
+                    self.file = BytesIO(content)
+
+            return pdf_processor.process_uploaded_pdf(
+                _SimpleUpload(filename, content_bytes)
+            )
+
+        try:
+            _document_parse_status[doc_id]["status"] = "parsing"
+            logger.info(f"[background] Starting full parse for {doc_id}")
+
+            result = await asyncio.to_thread(_do_parse)
+
+            _document_parse_status[doc_id].update(
+                {
+                    "status": "complete",
+                    "full_text": result.get("full_text", ""),
+                    "encrypted_text": result.get("encrypted_text", ""),
+                    "text_preview": result.get("text_preview", ""),
+                    "word_count": result.get("word_count", 0),
+                    "is_apple_card": result.get("is_apple_card", False),
+                    "completed_at": datetime.utcnow().isoformat(),
+                }
+            )
+            logger.info(
+                f"[background] Full parse complete for {doc_id}: {result.get('word_count', 0)} words"
+            )
+
+        except Exception as e:
+            logger.exception(f"[background] Full parse failed for {doc_id}: {e}")
+            _document_parse_status[doc_id].update(
+                {
+                    "status": "error",
+                    "error": str(e),
+                    "completed_at": datetime.utcnow().isoformat(),
+                }
+            )
+
+    async def _background_generate_intent(
+        doc_id: str, filename: str, document_context: dict
+    ):
+        """Background task: generates LLM intent question after quick response is sent."""
+
+        def _do_llm_call():
+            agent = SOA1Agent()
+            return agent.ask(
+                query=f"I just uploaded a document: {filename}",
+                document_context=document_context,
+            )
+
+        try:
+            logger.info(f"[background] Generating intent question for {doc_id}")
+            agent_result = await asyncio.to_thread(_do_llm_call)
+            agent_response = agent_result.get("answer", "")
+            _document_parse_status[doc_id]["agent_response"] = agent_response
+            _document_parse_status[doc_id]["intent_ready"] = True
+            logger.info(
+                f"[background] Intent question ready for {doc_id} ({len(agent_response)} chars)"
+            )
+        except Exception as e:
+            logger.warning(f"[background] Failed to generate intent for {doc_id}: {e}")
+            _document_parse_status[doc_id]["agent_response"] = None
+            _document_parse_status[doc_id]["intent_ready"] = True
+
     @app.post("/upload-pdf")
     async def upload_pdf(file: UploadFile = File(...), request: Request = None):
-        """Upload PDF document - metadata only. No auto-processing without consent."""
+        """Upload PDF - returns quick metadata immediately, full parsing runs in background."""
         client_ip = request.client.host if request else "unknown"
+        upload_start = time.time()
         logger.info(f"[{client_ip}] PDF upload requested: {file.filename}")
 
         try:
-            # Validate file
             if not file or not file.filename:
                 return JSONResponse(
                     status_code=400,
@@ -462,20 +600,15 @@ def create_app() -> FastAPI:
                     },
                 )
 
-            if (
-                hasattr(file, "size") and file.size and file.size > 10 * 1024 * 1024
-            ):  # 10MB limit
+            if hasattr(file, "size") and file.size and file.size > 10 * 1024 * 1024:
                 return JSONResponse(
                     status_code=400,
                     content={"status": "error", "message": "File too large (max 10MB)"},
                 )
 
-            # Save a copy into the WebUI finance upload directory so other components (e.g., /analyze-stage-ab)
-            # can find the file by doc_id. This keeps the upload and analysis flows compatible.
             from pathlib import Path
-            from io import BytesIO
+            import re
 
-            # Compute canonical finance uploads directory (project-root/home-ai/finance-agent/data/uploads)
             webui_upload_dir = (
                 Path(__file__).resolve().parents[1]
                 / "finance-agent"
@@ -484,11 +617,7 @@ def create_app() -> FastAPI:
             )
             webui_upload_dir.mkdir(parents=True, exist_ok=True)
 
-            # Create a finance-style doc_id matching the web UI convention
             doc_id = f"finance-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
-
-            # Sanitize filename to prevent path traversal
-            import re
 
             safe_filename = re.sub(
                 r"[^\w\-_\.]", "_", os.path.basename(file.filename or "upload.pdf")
@@ -497,21 +626,16 @@ def create_app() -> FastAPI:
                 safe_filename += ".pdf"
             dest_path = webui_upload_dir / f"{doc_id}_{safe_filename}"
 
-            # Read the uploaded file content and write to the destination
             try:
-                # Ensure we read from the start
                 try:
                     await file.seek(0)
                 except Exception:
                     pass
-
                 content_bytes = await file.read()
                 with open(dest_path, "wb") as fdest:
                     fdest.write(content_bytes)
             except Exception as e:
-                logger.exception(
-                    "Failed to save uploaded file to webui uploads dir: %s", e
-                )
+                logger.exception("Failed to save uploaded file: %s", e)
                 return JSONResponse(
                     status_code=500,
                     content={
@@ -520,139 +644,137 @@ def create_app() -> FastAPI:
                     },
                 )
 
-            # Create a simple file-like wrapper for pdf_processor
-            class _SimpleUpload:
-                def __init__(self, filename: str, content: bytes):
-                    self.filename = filename
-                    self.file = BytesIO(content)
-
-            try:
-                result = pdf_processor.process_uploaded_pdf(
-                    _SimpleUpload(file.filename, content_bytes)
-                )
-            except Exception as e:
-                logger.exception("PDF processing failed: %s", e)
-                return JSONResponse(
-                    status_code=500, content={"status": "error", "message": str(e)}
-                )
-
-            # Log result keys (avoid logging full text for privacy)
-            try:
-                logger.info(
-                    f"[{client_ip}] PDF processor returned keys: {list(result.keys())}"
-                )
-            except Exception:
-                logger.info(
-                    f"[{client_ip}] PDF processor returned a non-dict result: {type(result)}"
-                )
-
+            file_save_time = time.time()
             logger.info(
-                f"[{client_ip}] PDF uploaded: {result.get('pages_processed')} pages, {result.get('word_count')} words"
+                f"[{client_ip}] File saved in {(file_save_time - upload_start) * 1000:.0f}ms"
             )
 
-            # Persist document metadata and create analysis job record
+            quick_meta = pdf_processor.extract_quick_metadata(str(dest_path))
+            quick_meta_time = time.time()
+            logger.info(
+                f"[{client_ip}] Quick metadata in {(quick_meta_time - file_save_time) * 1000:.0f}ms"
+            )
+
+            _document_parse_status[doc_id] = {
+                "status": "pending_full_parse",
+                "filename": file.filename,
+                "pages": quick_meta.get("pages", 0),
+                "file_size_bytes": quick_meta.get("file_size_bytes", 0),
+                "inferred_type": quick_meta.get("inferred_type", "document"),
+                "header_lines": quick_meta.get("header_lines", []),
+                "dest_path": str(dest_path),
+                "created_at": datetime.utcnow().isoformat(),
+            }
+
             try:
                 from home_ai.finance_agent.src import storage as fa_storage
             except Exception:
                 import sys
-                from pathlib import Path
                 import importlib
 
-                # Add the finance-agent src directory to sys.path as a fallback
                 fa_src_path = (
                     Path(__file__).resolve().parents[1] / "finance-agent" / "src"
                 )
                 if str(fa_src_path) not in sys.path:
                     sys.path.insert(0, str(fa_src_path))
-
-                # Import the storage module directly from the finance-agent src
                 fa_storage = importlib.import_module("storage")
 
             fa_storage.save_document(
                 doc_id,
-                result.get("filename"),
-                result.get("pages_processed", 0),
-                result.get("file_size_bytes", 0),
+                file.filename,
+                quick_meta.get("pages", 0),
+                quick_meta.get("file_size_bytes", 0),
             )
 
-            # Create a job id and create analysis job record (pending consent)
             job_id = f"job-{doc_id}-{uuid.uuid4().hex[:6]}"
             fa_storage.create_analysis_job(job_id, doc_id, status="pending")
+
+            session_id = _get_session_id(request)
+            inferred_type = quick_meta.get("inferred_type", "document")
+            _add_pending_document(
+                session_id,
+                {
+                    "filename": file.filename,
+                    "pages": quick_meta.get("pages", 0),
+                    "size_kb": round(quick_meta.get("file_size_bytes", 0) / 1024, 1),
+                    "upload_time": datetime.utcnow().isoformat(),
+                    "detected_type": inferred_type,
+                    "doc_id": doc_id,
+                },
+            )
+
+            header_preview = "\n".join(quick_meta.get("header_lines", [])[:5])
+            document_context = {
+                "documents": [
+                    {
+                        "doc_id": doc_id,
+                        "filename": file.filename,
+                        "pages": quick_meta.get("pages", 0),
+                        "size_kb": round(
+                            quick_meta.get("file_size_bytes", 0) / 1024, 1
+                        ),
+                        "upload_time": datetime.utcnow().isoformat(),
+                        "detected_type": inferred_type,
+                        "preview_text": header_preview,
+                    }
+                ],
+                "session_id": session_id,
+            }
+
+            asyncio.create_task(
+                _background_full_parse(doc_id, str(dest_path), file.filename)
+            )
+            asyncio.create_task(
+                _background_generate_intent(doc_id, file.filename, document_context)
+            )
+
+            total_time = time.time() - upload_start
+            logger.info(
+                f"[{client_ip}] Upload response ready in {total_time * 1000:.0f}ms (parse + LLM continue in background)"
+            )
 
             payload = {
                 "status": "UPLOADED",
                 "doc_id": doc_id,
                 "job_id": job_id,
                 "file_id": str(uuid.uuid4()),
-                "filename": result.get("filename"),
-                "pages": result.get("pages_processed"),
-                "bytes": result.get("file_size_bytes", 0),
+                "filename": file.filename,
+                "pages": quick_meta.get("pages", 0),
+                "bytes": quick_meta.get("file_size_bytes", 0),
+                "detected_type": inferred_type,
+                "parse_status": "pending_full_parse",
+                "intent_ready": False,
+                "response_time_ms": round(total_time * 1000),
             }
-
-            # Track document in session for context injection
-            session_id = _get_session_id(request)
-            _add_pending_document(
-                session_id,
-                {
-                    "filename": result.get("filename"),
-                    "pages": result.get("pages_processed", 0),
-                    "size_kb": round(result.get("file_size_bytes", 0) / 1024, 1),
-                    "upload_time": datetime.utcnow().isoformat(),
-                    "detected_type": "financial_document",
-                    "doc_id": doc_id,
-                },
-            )
-
-            logger.info(
-                f"[{client_ip}] PDF uploaded: {result.get('pages_processed')} pages, {result.get('word_count')} words"
-            )
-
-            # Build document context for LLM response generation
-            document_context = {
-                "documents": [
-                    {
-                        "doc_id": doc_id,
-                        "filename": result.get("filename"),
-                        "pages": result.get("pages_processed", 0),
-                        "size_kb": round(result.get("file_size_bytes", 0) / 1024, 1),
-                        "upload_time": datetime.utcnow().isoformat(),
-                        "detected_type": "financial_document",
-                        "preview_text": result.get("text_preview", "")[:500]
-                        if result.get("text_preview")
-                        else "",
-                    }
-                ],
-                "session_id": session_id,
-            }
-
-            # Get LLM-generated response for the upload
-            # This follows the LLM-Driven Responses principle (see RemAssist/LLM_DRIVEN_RESPONSES.md)
-            agent_response = None
-            try:
-                agent = SOA1Agent()
-                agent_result = agent.ask(
-                    query=f"I just uploaded a document: {result.get('filename')}",
-                    document_context=document_context,
-                )
-                agent_response = agent_result.get("answer", "")
-                logger.info(
-                    f"[{client_ip}] LLM generated upload response ({len(agent_response)} chars)"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"[{client_ip}] Failed to get LLM response for upload: {e}"
-                )
-                # Graceful degradation - continue without LLM response
-
-            payload["agent_response"] = agent_response
             return JSONResponse(content=payload)
 
         except Exception as e:
-            # Log full stack trace for debugging
             logger.exception(f"PDF upload failed: {e}")
             return JSONResponse(
                 status_code=500, content={"status": "error", "message": str(e)}
             )
+
+    @app.get("/upload-status/{doc_id}")
+    async def get_upload_status(doc_id: str):
+        """Check the parsing status of an uploaded document."""
+        if doc_id not in _document_parse_status:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        status_data = _document_parse_status[doc_id]
+        return {
+            "doc_id": doc_id,
+            "status": status_data.get("status", "unknown"),
+            "filename": status_data.get("filename"),
+            "pages": status_data.get("pages"),
+            "inferred_type": status_data.get("inferred_type"),
+            "word_count": status_data.get("word_count"),
+            "is_apple_card": status_data.get("is_apple_card"),
+            "created_at": status_data.get("created_at"),
+            "completed_at": status_data.get("completed_at"),
+            "error": status_data.get("error"),
+            "intent_ready": status_data.get("intent_ready", False),
+            "agent_response": status_data.get("agent_response"),
+        }
 
     @app.post("/analyze-pdf")
     async def analyze_pdf(
@@ -678,7 +800,11 @@ def create_app() -> FastAPI:
     @app.post("/api/batch/consent")
     async def grant_batch_consent(batch_id: str, action: str, request: Request):
         if len(batch_id) > MAX_BATCH_ID_LENGTH:
-            raise ValidationError(f"Batch ID exceeds maximum length of {MAX_BATCH_ID_LENGTH} characters", "batch_id", batch_id[:50])
+            raise ValidationError(
+                f"Batch ID exceeds maximum length of {MAX_BATCH_ID_LENGTH} characters",
+                "batch_id",
+                batch_id[:50],
+            )
         state = batch_processor.get_batch_state(batch_id)
         if not state:
             raise HTTPException(status_code=404, detail="Batch not found")
@@ -699,6 +825,64 @@ def create_app() -> FastAPI:
             }
 
         return {"status": state.status}
+
+    @app.get("/api/batch/status/{batch_id}")
+    async def get_batch_status(batch_id: str):
+        if len(batch_id) > MAX_BATCH_ID_LENGTH:
+            raise ValidationError(
+                f"Batch ID exceeds maximum length of {MAX_BATCH_ID_LENGTH} characters",
+                "batch_id",
+                batch_id[:50],
+            )
+        state = batch_processor.get_batch_state(batch_id)
+        if not state:
+            raise HTTPException(status_code=404, detail="Batch not found")
+
+        return {
+            "batch_id": state.batch_id,
+            "status": state.status,
+            "file_count": len(state.files),
+            "files": [
+                {"filename": f.get("filename"), "pages": f.get("pages")}
+                for f in state.files
+            ],
+            "preliminary_insights": state.preliminary_insights,
+            "interesting_findings": state.interesting_findings,
+            "transaction_count": state.transaction_count,
+            "outputs_ready": state.outputs_ready,
+            "created_at": state.created_at,
+            "analysis_ready_at": state.analysis_ready_at,
+            "phinance_complete_at": state.phinance_complete_at,
+            "outputs_ready_at": state.outputs_ready_at,
+        }
+
+    @app.get("/api/batch/session/{session_id}")
+    async def get_session_batch(session_id: str):
+        if not CHAT_STORAGE_AVAILABLE:
+            raise HTTPException(status_code=501, detail="Storage not available")
+
+        batch_record = chat_storage.get_latest_batch_for_session(session_id)
+        if not batch_record:
+            return {"batch_id": None, "status": "none"}
+
+        batch_id = batch_record["batch_id"]
+        state = batch_processor.get_batch_state(batch_id)
+
+        if state:
+            return {
+                "batch_id": batch_id,
+                "status": state.status,
+                "file_count": len(state.files),
+                "in_memory": True,
+            }
+
+        return {
+            "batch_id": batch_id,
+            "status": batch_record.get("status", "unknown"),
+            "file_count": batch_record.get("file_count", 0),
+            "in_memory": False,
+            "created_at": batch_record.get("created_at"),
+        }
 
     @app.get("/api/output/{batch_id}/{format}")
     async def get_output(batch_id: str, format: str):

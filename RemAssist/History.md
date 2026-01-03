@@ -87,6 +87,47 @@
 ---
 
 
+### January 2, 2026 - Hybrid Calculation Architecture Complete (Session 23)
+
+#### Problem Solved
+LLMs fundamentally struggle with arithmetic on large datasets. Phinance returned garbage totals, NemoAgent was accurate but 71s too slow.
+
+#### Root Cause
+LLMs process tokens, not numbers. They "simulate" math via pattern matching rather than actual computation.
+
+#### Solution Implemented: Hybrid Architecture
+- **Python** calculates all numbers (0.05ms, 100% accurate)
+- **qwen2.5:7b-instruct** generates qualitative insights only (5-6s)
+- Combined: 6.3s total, accurate numbers + quality insights
+
+#### Key Discovery
+Phinance has a baked-in Modelfile system prompt that forces it to output the full financial analysis schema. It ignores "insights only" requests and outputs malformed JSON. Solution: Use qwen2.5 for insights instead.
+
+#### Hidden Drains Feature Added
+- **Python** detects potential hidden drains (small recurring charges <$50, 3+ times)
+- **LLM** verifies each drain contextually (is it truly discretionary/wasteful?)
+- Results include `is_drain` boolean and `llm_reason` explanation
+
+#### Files Created/Modified
+- **Created** `home-ai/soa1/utils/financial_calculator.py` - Python calculation utilities
+  - `calculate_financials()` - totals, categories, top merchants
+  - `detect_hidden_drains()` - finds small recurring charges
+  - `build_insights_prompt()` - includes drains for LLM verification
+  - `strip_markdown_fences()` - handles LLM response formatting
+- **Modified** `home-ai/soa1/models.py` - Added `call_insights_model()`, "insights" endpoint config
+- **Modified** `home-ai/soa1/agent.py` - Updated `_invoke_phinance()` for hybrid approach, enhanced drain display
+- **Updated** `RemAssist/INSIGHTS_QUALITY_COMPARISON.md` - Added hybrid results section
+- **Updated** `RemAssist/HYBRID_EXTRACTION_ARCHITECTURE.md` - Full architecture documentation
+
+#### Performance Results
+| Approach | Time | Math Accuracy |
+|----------|------|---------------|
+| Phinance only | 10s | ❌ Missing |
+| NemoAgent only | 71s | ⚠️ ~99% |
+| **Hybrid (Python + qwen2.5)** | **~5s** | ✅ **100%** |
+
+---
+
 ### January 2, 2026 - Hardware Specs Documentation (Session 22)
 
 #### 📄 Created Hardware Specs Document

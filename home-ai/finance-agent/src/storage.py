@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -10,6 +11,24 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import json
+
+
+# -----------------------------
+# Gzip compression helpers
+# -----------------------------
+def compress_text(text: str) -> bytes:
+    """Compress text using gzip. Returns bytes suitable for BLOB storage."""
+    if not text:
+        return b""
+    return gzip.compress(text.encode("utf-8"), compresslevel=6)
+
+
+def decompress_text(data: bytes) -> str:
+    """Decompress gzipped bytes back to text."""
+    if not data:
+        return ""
+    return gzip.decompress(data).decode("utf-8")
+
 
 DB_PATH = Path(
     os.environ.get(
@@ -115,6 +134,39 @@ def init_db() -> sqlite3.Connection:
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_history(session_id, created_at)
     """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS batches (
+            batch_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'uploading',
+            file_count INTEGER DEFAULT 0,
+            doc_ids TEXT,
+            extracted_text_gz BLOB,
+            phinance_analysis TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_batch_session ON batches(session_id)
+    """)
+
+    try:
+        conn.execute("ALTER TABLE batches ADD COLUMN doc_ids TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE batches ADD COLUMN extracted_text_gz BLOB")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE batches ADD COLUMN phinance_analysis TEXT")
+    except sqlite3.OperationalError:
+        pass
 
     conn.commit()
     return conn
@@ -527,3 +579,165 @@ def get_recent_sessions(
             }
             for r in rows
         ]
+
+
+def save_batch(
+    batch_id: str,
+    session_id: str,
+    status: str,
+    file_count: int,
+    doc_ids: Optional[List[str]] = None,
+) -> None:
+    doc_ids_json = json.dumps(doc_ids) if doc_ids else None
+    with get_db() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO batches(batch_id, session_id, status, file_count, doc_ids, updated_at)
+               VALUES(?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+            (batch_id, session_id, status, file_count, doc_ids_json),
+        )
+        conn.commit()
+
+
+def update_batch_status(batch_id: str, status: str) -> None:
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE batches SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE batch_id = ?",
+            (status, batch_id),
+        )
+        conn.commit()
+
+
+def get_batch(batch_id: str) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT batch_id, session_id, status, file_count, doc_ids, created_at, updated_at FROM batches WHERE batch_id = ?",
+            (batch_id,),
+        ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        if result.get("doc_ids"):
+            result["doc_ids"] = json.loads(result["doc_ids"])
+        return result
+
+
+def get_batches_for_session(session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT batch_id, session_id, status, file_count, doc_ids, created_at, updated_at
+               FROM batches WHERE session_id = ? ORDER BY created_at DESC LIMIT ?""",
+            (session_id, limit),
+        ).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            if d.get("doc_ids"):
+                d["doc_ids"] = json.loads(d["doc_ids"])
+            results.append(d)
+        return results
+
+
+def get_latest_batch_for_session(session_id: str) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        row = conn.execute(
+            """SELECT batch_id, session_id, status, file_count, doc_ids, created_at, updated_at
+               FROM batches WHERE session_id = ? ORDER BY created_at DESC LIMIT 1""",
+            (session_id,),
+        ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        if result.get("doc_ids"):
+            result["doc_ids"] = json.loads(result["doc_ids"])
+        return result
+
+
+def save_batch_extracted_text(batch_id: str, text: str) -> None:
+    """Save compressed extracted text for a batch."""
+    compressed = compress_text(text)
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE batches SET extracted_text_gz = ?, updated_at = CURRENT_TIMESTAMP WHERE batch_id = ?",
+            (compressed, batch_id),
+        )
+        conn.commit()
+
+
+def get_batch_extracted_text(batch_id: str) -> Optional[str]:
+    """Retrieve and decompress extracted text for a batch."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT extracted_text_gz FROM batches WHERE batch_id = ?",
+            (batch_id,),
+        ).fetchone()
+        if not row or not row[0]:
+            return None
+        return decompress_text(row[0])
+
+
+def save_batch_phinance_analysis(batch_id: str, analysis: Dict[str, Any]) -> None:
+    """Save Phinance analysis JSON for a batch."""
+    analysis_json = json.dumps(analysis)
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE batches SET phinance_analysis = ?, updated_at = CURRENT_TIMESTAMP WHERE batch_id = ?",
+            (analysis_json, batch_id),
+        )
+        conn.commit()
+
+
+def get_batch_phinance_analysis(batch_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve Phinance analysis JSON for a batch."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT phinance_analysis FROM batches WHERE batch_id = ?",
+            (batch_id,),
+        ).fetchone()
+        if not row or not row[0]:
+            return None
+        return json.loads(row[0])
+
+
+def get_incomplete_batches() -> List[Dict[str, Any]]:
+    """Get batches that need hydration (have extracted_text but not complete)."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT batch_id, session_id, status, file_count, doc_ids, 
+                      extracted_text_gz IS NOT NULL as has_text,
+                      phinance_analysis, created_at, updated_at
+               FROM batches 
+               WHERE status NOT IN ('complete', 'failed') 
+               AND extracted_text_gz IS NOT NULL
+               ORDER BY created_at DESC""",
+        ).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            if d.get("doc_ids"):
+                d["doc_ids"] = json.loads(d["doc_ids"])
+            if d.get("phinance_analysis"):
+                d["phinance_analysis"] = json.loads(d["phinance_analysis"])
+            results.append(d)
+        return results
+
+
+def get_batch_full(batch_id: str) -> Optional[Dict[str, Any]]:
+    """Get batch with all fields including extracted text (decompressed)."""
+    with get_db() as conn:
+        row = conn.execute(
+            """SELECT batch_id, session_id, status, file_count, doc_ids, 
+                      extracted_text_gz, phinance_analysis, created_at, updated_at
+               FROM batches WHERE batch_id = ?""",
+            (batch_id,),
+        ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        if result.get("doc_ids"):
+            result["doc_ids"] = json.loads(result["doc_ids"])
+        if result.get("extracted_text_gz"):
+            result["extracted_text"] = decompress_text(result["extracted_text_gz"])
+            del result["extracted_text_gz"]
+        if result.get("phinance_analysis"):
+            result["phinance_analysis"] = json.loads(result["phinance_analysis"])
+        return result

@@ -16,6 +16,12 @@ from output_generator import output_generator
 from utils.logger import get_logger
 from utils.errors import ValidationError, ServiceError, InternalError
 from utils.merchant_normalizer import normalize_transactions
+from utils.financial_calculator import (
+    calculate_financials,
+    build_insights_prompt,
+    merge_calculated_with_llm_response,
+    strip_markdown_fences,
+)
 
 logger = get_logger("agent")
 
@@ -169,16 +175,11 @@ class SOA1Agent:
         return "\n".join(lines)
 
     def _invoke_phinance(self, document_context: Optional[Dict[str, Any]]) -> str:
-        """
-        Invoke the phinance model to analyze financial documents.
-        Returns a user-friendly summary of the analysis results.
-        """
+        """Invoke phinance with hybrid approach: Python calculates, LLM provides insights."""
         if not document_context or not document_context.get("documents"):
             return "I don't have any documents loaded to analyze. Please upload a document first."
 
         try:
-            from models import call_phinance
-
             docs = document_context.get("documents", [])
             doc_ids = [d.get("doc_id") for d in docs if d.get("doc_id")]
 
@@ -207,19 +208,32 @@ class SOA1Agent:
                     "Would you like me to extract the transactions?"
                 )
 
-            payload = {
-                "transactions": all_transactions,
-                "currency": "USD",
-                "request_type": "full_analysis",
-            }
+            calculated = calculate_financials(all_transactions)
+            logger.info(
+                f"Calculated financials: total=${calculated['total_spent']}, "
+                f"categories={len(calculated['categories'])}, "
+                f"merchants={len(calculated['top_merchants'])}"
+            )
 
-            logger.info(f"Invoking phinance with {len(all_transactions)} transactions")
-            raw_response, _ = call_phinance(json.dumps(payload))
+            insights_prompt = build_insights_prompt(all_transactions, calculated)
+            logger.info(f"Invoking insights model (qwen2.5) with pre-calculated data")
+
+            from models import call_insights_model
+
+            raw_response = call_insights_model(insights_prompt)
 
             try:
-                analysis = json.loads(raw_response)
+                cleaned_response = strip_markdown_fences(raw_response)
+                llm_insights = json.loads(cleaned_response)
             except json.JSONDecodeError:
-                analysis = {"raw": raw_response}
+                llm_insights = {
+                    "insights": [],
+                    "recommendations": [],
+                    "potential_savings": 0,
+                    "verified_drains": [],
+                }
+
+            analysis = merge_calculated_with_llm_response(calculated, llm_insights)
 
             return self._format_analysis_response(analysis, len(all_transactions))
 
@@ -260,6 +274,28 @@ class SOA1Agent:
                         name = m.get("name") or m.get("merchant", "Unknown")
                         amt = m.get("amount") or m.get("total", 0)
                         lines.append(f"  • {name}: ${abs(float(amt)):,.2f}")
+            lines.append("")
+
+        drains = analysis.get("hidden_drains", [])
+        if drains:
+            lines.append("💸 **Hidden Drains** (Small recurring charges):")
+            for drain in drains:
+                if isinstance(drain, dict):
+                    name = drain.get("merchant", "Unknown")
+                    annual = drain.get("annual_projection") or drain.get(
+                        "annual_cost", 0
+                    )
+                    is_drain = drain.get("is_drain", True)
+                    reason = drain.get("llm_reason", "")
+
+                    if is_drain:
+                        lines.append(f"  🚨 {name}: ~${float(annual):,.2f}/year")
+                        if reason:
+                            lines.append(f"     → {reason}")
+                    else:
+                        lines.append(
+                            f"  ✅ {name}: ~${float(annual):,.2f}/year (verified OK)"
+                        )
             lines.append("")
 
         insights = analysis.get("insights") or analysis.get("recommendations", [])
@@ -333,21 +369,38 @@ class SOA1Agent:
             )
 
             analysis_dict = analysis.model_dump()
-            analysis_dict["transactions"] = [
-                t.model_dump() for t in transactions.transactions
-            ]
+            tx_list = [t.model_dump() for t in transactions.transactions]
 
-            if "transactions" in analysis_dict and isinstance(
-                analysis_dict["transactions"], list
-            ):
-                analysis_dict["transactions"] = normalize_transactions(
-                    analysis_dict["transactions"]
+            if tx_list:
+                tx_list = normalize_transactions(tx_list)
+
+            analysis_dict["transactions"] = tx_list
+
+            if tx_list:
+                calculated = calculate_financials(tx_list)
+                analysis_dict["total_spent"] = calculated["total_spent"]
+                analysis_dict["categories"] = calculated["categories"]
+                analysis_dict["top_merchants"] = calculated["top_merchants"]
+                analysis_dict["transaction_count"] = calculated["transaction_count"]
+                analysis_dict["avg_transaction"] = calculated["avg_transaction"]
+                analysis_dict["date_range"] = calculated.get("date_range")
+                logger.info(
+                    f"Python-calculated financials: total=${calculated['total_spent']}, "
+                    f"tx_count={calculated['transaction_count']}"
                 )
 
             state.phinance_analysis = analysis_dict
             state.phinance_attempts = attempts
             state.status = "complete"
             state.phinance_complete_at = time.time()
+
+            try:
+                from home_ai.finance_agent.src import storage as chat_storage
+
+                chat_storage.save_batch_phinance_analysis(batch_id, analysis_dict)
+                logger.info(f"Persisted phinance analysis for batch {batch_id}")
+            except Exception as persist_err:
+                logger.warning(f"Failed to persist phinance analysis: {persist_err}")
 
             await batch_processor.pre_generate_outputs(batch_id, output_generator)
 

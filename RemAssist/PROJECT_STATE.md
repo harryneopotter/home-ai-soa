@@ -1,8 +1,10 @@
 # SOA1 Project State - January 2026
 
-**Version**: 2.1  
-**Last Updated**: January 2, 2026 (Session 22)  
+**Version**: 2.2  
+**Last Updated**: January 2, 2026 (Session 24)  
 **Hardware**: Intel X670 + 2x NVIDIA RTX 5060 Ti (16GB each, 32GB total VRAM)
+
+> ⚠️ **For batch/upload work**: See `RemAssist/BATCH_FLOW.md` for the 5-phase progressive pipeline.
 
 ---
 
@@ -405,7 +407,7 @@ tail -f /home/ryzen/projects/soa-webui/logs/soa-webui.log
 
 ---
 
-## Current Status (January 1, 2026)
+## Current Status (January 2, 2026)
 
 ### ✅ Working
 - PDF upload and document tracking
@@ -419,9 +421,12 @@ tail -f /home/ryzen/projects/soa-webui/logs/soa-webui.log
 - Cross-document comparison
 - Merchant normalization (40+ patterns)
 - Security hardening (XSS, path traversal)
+- Progressive single-file upload (`/upload-pdf` returns in ~30ms)
 
 ### ⚠️ Known Issues
-- Existing transactions need `doc_id` migration (fixed Jan 1, 2026)
+- **CRITICAL**: `GET /api/batch/status/{batch_id}` endpoint missing in SOA1
+  - WebUI batch upload shows "Processing in background" forever
+  - See `RemAssist/BATCH_FLOW.md` for required fix
 - MemLayer connection may fail (graceful degradation in place)
 
 ### 🔜 Planned
@@ -435,14 +440,16 @@ tail -f /home/ryzen/projects/soa-webui/logs/soa-webui.log
 
 ## Related Documentation
 
+- `RemAssist/BATCH_FLOW.md` - **Batch upload 5-phase pipeline (READ FIRST for upload work)**
 - `RemAssist/IMPLEMENTATION_GUIDE.md` - Core invariants, consent rules
+- `RemAssist/LLM_DRIVEN_RESPONSES.md` - All user-facing text from LLM
 - `RemAssist/History.md` - Session history, changes made
 - `RemAssist/NEXT_TASKS.md` - Task queue
 - `RemAssist/errors.md` - Error tracking log
+- `RemAssist/HARDWARE_SPECS.md` - System hardware specs (MUST CHECK for GPU decisions)
+- `RemAssist/PROGRESSIVE_BATCH_ARCHITECTURE.md` - Full technical spec with security layer
 - `home-ai/ARCHITECTURE.md` - Detailed system architecture
 - `AGENTS.md` - AI agent guidelines
-
-- `RemAssist/HARDWARE_SPECS.md` - System hardware specs (MUST CHECK for GPU decisions)
 
 ---
 

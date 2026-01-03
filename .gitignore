@@ -146,3 +146,9 @@ FINANCE_MVP_PLAN_V2.md
 IMPLEMENTATION_GUIDE.md
 *init*.*
 test_logs/
+
+# Session logs and scratch files
+session-ses_*.md
+pdf-parser*.md
+phi-fail.txt
+*.jpg
