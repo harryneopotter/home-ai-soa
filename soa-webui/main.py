@@ -191,24 +191,10 @@ def get_service_status() -> List[ServiceStatus]:
             "required": True,
         },
         {
-            "name": "soa1_web",
-            "display": "SOA1 Web Interface",
-            "port": 8002,
-            "url": config.services.get("web_interface", "http://localhost:8002"),
-            "required": False,
-        },
-        {
-            "name": "service_monitor",
-            "display": "Service Monitor",
-            "port": 8003,
-            "url": config.services.get("service_monitor", "http://localhost:8003"),
-            "required": False,
-        },
-        {
-            "name": "memlayer",
-            "display": "Memlayer",
-            "port": 8000,
-            "url": config.services.get("memlayer", "http://localhost:8000"),
+            "name": "soa_webui",
+            "display": "SOA WebUI",
+            "port": 8080,
+            "url": "http://localhost:8080",
             "required": True,
         },
         {
@@ -247,7 +233,11 @@ def get_service_status() -> List[ServiceStatus]:
             # Try to connect to the service
             if service.pid:
                 try:
-                    response = requests.get(f"{service.url}/health", timeout=2)
+                    # Ollama uses different health check endpoint
+                    if service.name == "ollama":
+                        response = requests.get(f"{service.url}/api/tags", timeout=2)
+                    else:
+                        response = requests.get(f"{service.url}/health", timeout=2)
                     if response.status_code == 200:
                         service.status = "running"
                     else:

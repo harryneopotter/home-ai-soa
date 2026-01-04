@@ -15,7 +15,7 @@
                     colors: {
                         'bg-brutal-dark': '#000000',
                         'text-brutal-light': '#FFFFFF',
-                        'text-brutal-gray': '#AAAAAA',
+                        'text-brutal-gray': '#C0C0C0',
                         'accent-neon-orange': '#FF6600',
                         'accent-green': '#00FF66',
                         'accent-red': '#FF3333',
@@ -56,7 +56,7 @@
             line-height: 1.25rem;
         }
         .brutal-subtext {
-            color: #AAAAAA;
+            color: #C0C0C0;
             font-family: 'Space Mono', monospace;
             font-size: 0.75rem;
             line-height: 1rem;
@@ -382,8 +382,8 @@
                 const statusClass = s.status === 'running' ? 'brutal-status-running' : 
                                    s.status === 'stopped' ? 'brutal-status-stopped' : 'text-text-brutal-gray';
                 
-                // Show control buttons only for implementable services
-                const canControl = ['soa1_api'].includes(s.name);
+                // Show control buttons only for controllable services
+                const canControl = ['soa1_api', 'soa_webui'].includes(s.name);
                 let controlHtml = '';
                 
                 if (canControl) {

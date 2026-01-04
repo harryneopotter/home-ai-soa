@@ -9,9 +9,8 @@ server:
 # SOA1 Services
 services:
   api: "http://localhost:8001"
-  web_interface: "http://localhost:8002"
-  service_monitor: "http://localhost:8003"
-  memlayer: "http://localhost:8000"
+  webui: "http://localhost:8080"
+  ollama: "http://localhost:11434"
 
 # Tailscale settings
 tailscale:
