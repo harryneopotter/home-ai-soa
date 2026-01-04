@@ -489,7 +489,7 @@
 
             // Create agent message bubble with thinking indicator
             const contentEl = appendStreamingMessage('agent');
-            contentEl.innerHTML = '<span class="thinking-indicator">Thinking<span class="dots"></span></span>';
+            contentEl.innerHTML = '<span class="thinking-indicator">Generating Response<span class="dots"></span></span>';
             
             try {
                 const response = await fetch('/api/chat/stream', {
