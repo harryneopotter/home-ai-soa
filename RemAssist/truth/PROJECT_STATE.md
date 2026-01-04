@@ -1,10 +1,10 @@
 # SOA1 Project State - January 2026
 
-**Version**: 2.2  
-**Last Updated**: January 2, 2026 (Session 24)  
+**Version**: 2.3  
+**Last Updated**: January 4, 2026 (Session 30)  
 **Hardware**: Intel X670 + 2x NVIDIA RTX 5060 Ti (16GB each, 32GB total VRAM)
 
-> ⚠️ **For batch/upload work**: See `RemAssist/BATCH_FLOW.md` for the 5-phase progressive pipeline.
+> ⚠️ **For batch/upload work**: See `RemAssist/truth/PROGRESSIVE_FLOW.md` for the 4-phase progressive pipeline.
 
 ---
 

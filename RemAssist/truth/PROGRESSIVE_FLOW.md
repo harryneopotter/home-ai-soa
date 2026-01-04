@@ -167,9 +167,9 @@ class BatchState:
 
 | File | Responsibility |
 |------|----------------|
-| `soa1/api.py` | HTTP endpoints, session management, triggers background tasks |
+| `soa1/api.py` | HTTP endpoints, session management |
 | `soa1/batch_processor.py` | BatchState management, background extraction, output pre-generation |
-| `soa1/agent.py` | LLM interaction, consent detection, `_invoke_phinance()` |
+| `soa1/agent.py` | LLM interaction, consent detection, `_invoke_phinance()`, **spawns own background phinance thread** |
 | `soa1/output_generator.py` | Generate dashboard JSON, PDF command, infographic prompt |
 | `finance-agent/src/parser.py` | `FinanceStatementParser` - regex transaction extraction |
 | `soa1/utils/financial_calculator.py` | Python calculation utilities |
@@ -191,9 +191,9 @@ class BatchState:
 ```
 1. Get session's active BatchState
 2. If user gives consent AND [INVOKE:phinance] detected:
-   a. Save transactions to DB (transactions_persisted = True)
-   b. Return "interesting_findings" immediately
-   c. Kick off phinance in background
+   a. Agent spawns background thread for phinance analysis
+   b. Save transactions to DB (transactions_persisted = True)
+   c. Return "interesting_findings" immediately
 3. If phinance complete → present summary, ask output format
 4. If user selects output → return pre-generated output instantly
 ```
@@ -237,27 +237,32 @@ async def extract_and_calculate(batch_id: str):
 ```
 
 ### Task 2: `run_phinance_analysis()` (runs after consent)
+
+**Note**: As of Session 30, phinance analysis is spawned directly by the agent via `_spawn_phinance_background()`, not triggered by API endpoints.
+
 ```python
-async def run_phinance_analysis(batch_id: str):
-    state = get_batch_state(batch_id)
-    state.status = "analyzing"
+def _spawn_phinance_background(batch_id: str, document_context: Dict):
+    """Agent spawns its own background thread - no API cooperation needed."""
     
-    # 1. Save transactions to DB (consent was given)
-    save_transactions_to_db(state.extracted_transactions)
-    state.transactions_persisted = True
+    def _run_analysis():
+        state.status = "analyzing"
+        
+        # 1. Save transactions to DB (consent was given)
+        save_transactions_to_db(state.extracted_transactions)
+        state.transactions_persisted = True
+        
+        # 2. Call phinance for deep insights
+        analysis = _invoke_phinance(document_context)
+        
+        # 3. Merge Python numbers with LLM insights
+        state.phinance_analysis = merge_calculated_with_llm(...)
+        state.status = "complete"
+        
+        # 4. Immediately start pre-generating outputs
+        pre_generate_outputs_sync(batch_id)
     
-    # 2. Call phinance for deep insights
-    analysis = call_phinance(state.calculated_summary)
-    
-    # 3. Merge Python numbers with LLM insights
-    state.phinance_analysis = merge_calculated_with_llm(
-        state.calculated_summary, analysis
-    )
-    state.analysis_complete_at = time.time()
-    state.status = "complete"
-    
-    # 4. Immediately start pre-generating outputs
-    asyncio.create_task(pre_generate_outputs(batch_id))
+    thread = threading.Thread(target=_run_analysis, daemon=True)
+    thread.start()
 ```
 
 ### Task 3: `pre_generate_outputs()` (runs after analysis)
@@ -329,4 +334,5 @@ async def pre_generate_outputs(batch_id: str):
 
 | Date | Change |
 |------|--------|
+| 2026-01-04 | Updated Task 2 to reflect self-spawning phinance (agent spawns own thread) |
 | 2026-01-03 | Initial version - documented progressive flow architecture |

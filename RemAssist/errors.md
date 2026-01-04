@@ -7,6 +7,37 @@ Agents MUST update this file when encountering and resolving errors.
 
 ## Error Log
 
+### 2026-01-04: Streaming Endpoint Missing Phinance Trigger Handler
+
+**Error:**
+```
+Batch stuck at status="analyzing", phinance_complete_at=null
+Log shows: "Detected [INVOKE:phinance] signal - routing to phinance"
+But no subsequent "Started background phinance analysis" log
+```
+
+**Context:** User triggered analysis via the streaming chat endpoint (`/api/chat/stream`). The LLM correctly emitted `[INVOKE:phinance]`, but analysis never started.
+
+**Root Cause:**
+The `/api/chat/stream` endpoint was missing the `trigger_phinance_background` handler that existed in the regular `/api/chat` endpoint. The agent returned `{"trigger_phinance_background": batch_id}` but the streaming endpoint never checked for this key.
+
+**Fix Applied:**
+Instead of adding yet another handler to the streaming endpoint, we made the agent **self-contained**:
+
+1. `agent.py`: Added `_spawn_phinance_background()` method that spawns a daemon thread
+2. `agent.py`: Agent now calls this method directly instead of returning `trigger_phinance_background`
+3. `batch_processor.py`: Added `pre_generate_outputs_sync()` wrapper for thread compatibility
+4. `api.py`: Removed `_run_phinance_background()` function and all `trigger_phinance_background` handlers
+
+**Benefits of new approach:**
+- Works regardless of which endpoint calls `agent.ask()`
+- No duplicate handler code needed
+- Agent is "system aware" and self-contained
+
+**Status:** ✅ RESOLVED
+
+---
+
 ### 2026-01-03: Phases 2 & 3 Collapsed - Full Analysis Returned on Consent
 
 **Error:**

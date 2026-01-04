@@ -1,3 +1,78 @@
+### January 4, 2026 - Self-Spawning Phinance Analysis (Session 30)
+
+#### Problem Solved
+When using the `/api/chat/stream` endpoint, phinance analysis never started because the streaming endpoint was missing the `trigger_phinance_background` handler. The agent returned the trigger signal, but the API endpoint didn't act on it.
+
+#### Root Cause
+The architecture required API endpoints to cooperate by checking for `trigger_phinance_background` in the agent response and spawning background tasks. When we added `/api/chat/stream`, we forgot to add this handler, causing analysis to get stuck at "analyzing" status.
+
+#### Solution: Self-Contained Agent
+Made the agent "system aware" - it now spawns its own background thread for phinance analysis instead of returning a trigger signal for the API to handle.
+
+**Before**: Agent returns `{"trigger_phinance_background": batch_id}` → API must spawn task
+**After**: Agent calls `self._spawn_phinance_background()` directly → No API cooperation needed
+
+#### Key Changes
+
+| File | Change |
+|------|--------|
+| `soa1/agent.py` | Added `threading` import |
+| `soa1/agent.py` | Added `_spawn_phinance_background()` method - spawns daemon thread for analysis |
+| `soa1/agent.py` | Removed `trigger_phinance_background` from return dict, calls spawn method instead |
+| `soa1/batch_processor.py` | Added `pre_generate_outputs_sync()` - sync wrapper for use in threads |
+| `soa1/api.py` | Removed `_run_phinance_background()` async function (no longer needed) |
+| `soa1/api.py` | Removed `trigger_phinance_background` handlers from `/api/chat` and `/api/chat/stream` |
+
+#### Benefits
+- Works regardless of which endpoint calls `agent.ask()`
+- No duplicate handler code needed in multiple endpoints
+- Agent is self-contained and "system aware"
+- Simpler mental model - agent handles its own background work
+
+#### Error Handling
+All existing protections remain in place:
+- Phinance model calls have 3x retry with exponential backoff
+- JSON parsing has fallback defaults
+- Background thread catches all exceptions, sets `state.status = "failed"` on error
+- Output pre-generation failure is caught and logged (non-fatal)
+
+---
+
+### January 4, 2026 - Action Buttons for Analysis Consent (Session 30 continued)
+
+#### Feature Added
+After document upload, the agent now returns action buttons for the user to select:
+- **"Run Detailed Analysis"** - Triggers phinance analysis
+- **"Ask Something Else"** - Lets user ask a different question
+
+#### Implementation
+
+| File | Change |
+|------|--------|
+| `soa1/api.py` | Added `actions` field to `ChatResponse` model |
+| `soa1/api.py` | Upload endpoint returns `actions` from agent result |
+| `soa1/agent.py` | Returns `actions` array when batch is in "ready" state with extracted transactions |
+| `soa-webui/templates/index.html` | `appendMessage()` now accepts optional `actions` parameter |
+| `soa-webui/templates/index.html` | Renders buttons with `brutal-btn` styling, click sends action value as message |
+
+#### Flow
+```
+User uploads PDFs
+    ↓
+Parser extracts transactions (background)
+    ↓
+Agent response includes actions: [
+    {"label": "Run Detailed Analysis", "value": "yes, run detailed analysis"},
+    {"label": "Ask Something Else", "value": "I have a different question"}
+]
+    ↓
+Frontend renders buttons below message
+    ↓
+User clicks button → value sent as chat message → triggers analysis
+```
+
+---
+
 ### January 3, 2026 - Progressive Flow Phase Separation (Session 29)
 
 #### Problem Solved

@@ -1,11 +1,12 @@
 # 📋 RemAssist — Unified Task Queue
 *Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-_Last updated: January 3, 2026 (Apple Card Parser Fix Session)_
+_Last updated: January 4, 2026 (Self-Spawning Phinance Session)_
 
 ---
 
 ## 🔍 Current System Snapshot
+- ✅ **Self-Spawning Phinance**: Agent spawns own background thread, no API cooperation needed
 - ✅ **Hybrid Calculation Architecture**: Python calculates (100% accurate), qwen2.5 generates insights (6.3s total)
 - ✅ **Rate Limiting Implemented**: Configured for all public-facing endpoints (10/min for uploads, 20/min for TTS, 100/min for general API).
 - ✅ **Apple Card Extraction FIXED**: State machine parser replaces broken regex, extracts 266+ transactions from 5 PDFs
@@ -38,6 +39,14 @@ _Last updated: January 3, 2026 (Apple Card Parser Fix Session)_
   - [ ] Integrate with SOA1Agent, replace MemLayer
 
 ---
+
+## 🏁 Recently Completed (Jan 4, 2026 - Session 30)
+- **Session 30**: Self-Spawning Phinance Analysis
+  - Root cause: `/api/chat/stream` was missing `trigger_phinance_background` handler
+  - Solution: Made agent self-contained - spawns own background thread via `_spawn_phinance_background()`
+  - Removed API-side `_run_phinance_background()` function
+  - Added `pre_generate_outputs_sync()` to batch_processor for thread compatibility
+  - Files: agent.py, api.py, batch_processor.py
 
 ## 🏁 Recently Completed (Jan 3, 2026 - Session 29)
 - **Session 29**: Progressive Flow Phase Separation
