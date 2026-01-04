@@ -1,3 +1,80 @@
+### January 3, 2026 - Progressive Flow Phase Separation (Session 29)
+
+#### Problem Solved
+Phases 2 & 3 were collapsed - when user said "yes, analyze", they received the ENTIRE analysis immediately instead of progressive engagement.
+
+#### Root Cause
+In `agent.py` line ~574, `_invoke_phinance()` ran **synchronously** and returned full result immediately. No separation between consent acknowledgment and analysis completion.
+
+#### Solution Implemented: Async Phase Separation
+- **Phase 2 (Consent)**: Returns `interesting_findings` immediately with engagement message
+- **Background**: Phinance analysis runs asynchronously via `asyncio.create_task()`
+- **Phase 3 (Complete)**: Frontend polls `/api/batch/status/{batch_id}` for completion
+
+#### Key Changes
+
+| File | Change |
+|------|--------|
+| `soa1/agent.py` | When `[INVOKE:phinance]` detected with `status="ready"`, return immediately with findings and signal `trigger_phinance_background` |
+| `soa1/api.py` | Added `_run_phinance_background()` async function, triggered by chat endpoint |
+| `soa1/api.py` | Enhanced `/api/batch/status/{batch_id}` to include `analysis_summary` and `completion_message` when `status="complete"` |
+
+#### Duplicate Output Prompt Fixed
+Removed duplicate "How would you like the report?" section from `_run_hybrid_analysis()` - kept only the one in `_format_analysis_response()`.
+
+#### New Flow
+```
+User: "yes, analyze"
+    ↓
+API: Calls agent.ask()
+    ↓
+Agent: Detects [INVOKE:phinance], returns immediately:
+    "Starting analysis! While I work, here's what I noticed:
+     • Total spending: $33,455.07 across 266 transactions
+     • Highest category: Shopping at $X..."
+    + trigger_phinance_background = batch_id
+    ↓
+API: Starts asyncio task _run_phinance_background()
+    Returns response to user immediately
+    ↓
+Background: _invoke_phinance() runs (5-10s)
+    Sets state.status = "complete"
+    Triggers output pre-generation
+    ↓
+Frontend: Polls /api/batch/status/{batch_id}
+    Detects status="complete"
+    Shows completion_message with format options
+```
+
+#### Files Modified
+- `home-ai/soa1/agent.py` - Phase separation in `ask()` method
+- `home-ai/soa1/api.py` - Background phinance task, enhanced status endpoint
+
+---
+
+### January 3, 2026 - Refined Agent Flow & Instant Delivery (Session 27)
+
+#### Improvements Implemented
+- **True Orchestration**: Refined the agent's acknowledgment logic to use a system directive instead of a hardcoded query. The LLM now analyzes injected document metadata to generate specific, engaging responses.
+- **Situational Awareness**: Updated `_format_document_context` to include the `BatchState` (status, transaction count, preliminary findings). The orchestrator is now aware of the pipeline's progress and results.
+- **Progressive Flow Implementation**: Restructured the upload process to perform a quick metadata scan (~500ms) for immediate response, deferring full parsing and PII redaction to a background task.
+- **Instant Delivery Architecture**: Consolidated the output schema to a flat JSON format and implemented pre-generation of Dashboard JSON, PDF Commands, and Infographic Prompts immediately after Specialist completion.
+- **Dashboard Consolidation**: Standardized on `soa_dashboard.html` as the primary UI, with dynamic data fetching for both individual documents and full batches.
+- **Apple Card Multiline Regex**: Updated `APPLE_CARD_REGEX` in `batch_processor.py` to support the multi-line format (Date, Merchant, Cashback, Amount) found in extracted text, fixing the zero transaction extraction bug.
+- **UI Contrast Improvements**: Improved contrast for better readability on the dark background across the chat interface and status bar.
+
+#### Files Modified
+- **`home-ai/soa1/pdf_processor.py`**: Added `inferred_type` to `process_uploaded_pdf` and updated response fields.
+- **`home-ai/soa1/api.py`**: Refactored `/upload-batch` for progressive response, fixed syntax error in `/api/output`, and updated output retrieval logic.
+- **`home-ai/soa1/batch_processor.py`**: Updated `APPLE_CARD_REGEX` for multiline support, refactored `background_analyze` to `background_full_process` and standardized `outputs` dictionary using `pdf_command`.
+- **`home-ai/soa1/agent.py`**: Refactored `_format_document_context` and `_run_hybrid_analysis` for better situational awareness and engagement.
+- **`home-ai/soa1/output_generator.py`**: Refined output generation logic and flattened JSON schema.
+- **`soa-webui/main.py`**: Added `/api/proxy/output` endpoint and refined dashboard routing (disabled consolidated view).
+- **`soa-webui/templates/index.html`**: Improved UI contrast.
+- **`soa-webui/templates/soa_dashboard.html`**: Implemented dynamic data source logic.
+
+---
+
 ### January 2, 2026 - Security Hardening: Rate Limiting (Session 20)
 
 #### 🛡️ Rate Limiting Implemented
@@ -151,3 +228,67 @@ Phinance has a baked-in Modelfile system prompt that forces it to output the ful
 #### 🎯 Key Decision
 - Agents MUST check HARDWARE_SPECS.md before proposing new models or GPU-intensive features
 - This prevents proposals that exceed available VRAM budget
+
+---
+
+### January 3, 2026 - Two-Tier Memory Architecture Design (Session 26)
+
+#### 🧠 Memory System Redesign: Mem0 + LightRAG
+
+**Problem**: Current MemLayer is limited - needs better conversation memory, entity tracking, and document analysis capabilities for household use cases.
+
+**Decision**: Implement two-tier memory architecture:
+
+| Tier | System | Purpose | Response Time |
+|------|--------|---------|---------------|
+| **Warm Memory** | Mem0 (Kuzu + ChromaDB) | Conversation memory, entity tracking, family knowledge, schedules | <100ms |
+| **Cold/Document Memory** | LightRAG (NetworkX + vector) | PDF analysis, document RAG, historical queries | 1-3s |
+
+#### Coverage Analysis
+
+**Mem0 handles (95% of queries):**
+- Entity lookups ("When is Jake's exam?")
+- Relationship queries ("What subjects does Emma struggle with?")
+- Recent context, reminders, pattern recognition
+- Schedule queries, pet care tracking
+
+**LightRAG handles (5% of queries):**
+- Document analysis ("What did the vet report say?")
+- PDF extraction ("Jake's course syllabi")
+- Historical documents, financial comparisons
+
+#### Implementation Plan (3 weeks)
+- **Week 1**: Mem0 setup - Kuzu + ChromaDB + Ollama, replace MemLayer
+- **Week 2**: LightRAG setup - document ingestion, query router
+- **Week 3**: Integration - nightly sync, entity linking, testing
+
+#### Architecture Diagram
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  User Query → SOA1 Orchestrator (NemoAgent)                     │
+│                        │                                         │
+│         ┌──────────────┴──────────────┐                         │
+│         ↓                             ↓                         │
+│  ┌─────────────────┐       ┌─────────────────────┐              │
+│  │     MEM0        │       │      LIGHTRAG       │              │
+│  │ (Conversation)  │       │    (Documents)      │              │
+│  │                 │       │                     │              │
+│  │ • Kuzu Graph    │       │ • NetworkX Graph    │              │
+│  │ • ChromaDB      │       │ • Vector Store      │              │
+│  │ • Fast lookups  │       │ • PDF/Doc Store     │              │
+│  └─────────────────┘       └─────────────────────┘              │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │             NIGHTLY SYNC (Background Job)                │    │
+│  │  • Promote Mem0 facts → persistent storage              │    │
+│  │  • Ingest new documents → LightRAG                      │    │
+│  │  • Cross-link entities between systems                  │    │
+│  └─────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Key Benefits
+- **100% household scenario coverage** with no compromises
+- **Ollama-native** - both systems support local LLM
+- **Clear separation** - conversation vs document queries
+- **Scalable** - can add more tiers later (scheduler, budgeting)

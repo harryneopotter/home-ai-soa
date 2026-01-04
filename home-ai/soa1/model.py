@@ -1,5 +1,5 @@
 import requests
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Generator
 import yaml
 import json
 import time
@@ -203,3 +203,52 @@ class ModelClient:
         self._log_response(content, latency_ms, usage)
 
         return content
+
+    def chat_stream(
+        self, system_prompt: str, conversation: List[Dict[str, str]]
+    ) -> Generator[str, None, None]:
+        """Stream chat response chunk by chunk from Ollama."""
+        self._log_request(system_prompt, conversation)
+
+        payload: Dict[str, Any] = {
+            "model": self.model_name,
+            "messages": [{"role": "system", "content": system_prompt}] + conversation,
+            "options": {
+                "temperature": self.temperature,
+                "num_predict": self.max_tokens,
+                "num_ctx": self.num_ctx,
+                "num_gpu": 99,
+            },
+            "stream": True,
+            "keep_alive": -1,
+            "think": False,
+        }
+
+        logger.info(
+            f"[OLLAMA-STREAM-REQ] model={self.model_name} keep_alive={payload.get('keep_alive')}"
+        )
+
+        start_time = time.time()
+        full_response = []
+
+        with requests.post(
+            f"{self.base_url}/api/chat", json=payload, timeout=120, stream=True
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if line:
+                    try:
+                        data = json.loads(line)
+                        if "message" in data:
+                            chunk = data["message"].get("content", "")
+                            if chunk:
+                                full_response.append(chunk)
+                                yield chunk
+                        if data.get("done"):
+                            break
+                    except json.JSONDecodeError:
+                        continue
+
+        latency_ms = (time.time() - start_time) * 1000
+        complete_text = "".join(full_response)
+        self._log_response(complete_text, latency_ms, {})

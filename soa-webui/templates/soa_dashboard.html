@@ -1042,7 +1042,8 @@
     </div>
 
     <script>
-        const DOC_ID = "{{ doc_id }}";
+        const DOC_ID = "{{ doc_id if doc_id else '' }}";
+        const BATCH_ID = "{{ batch_id if batch_id else '' }}";
         let allTransactions = [];
         let filteredTransactions = [];
         let analysisData = null;
@@ -1063,7 +1064,7 @@
             if (status === 'live') {
                 dot.classList.add('live');
                 text.classList.add('live');
-                text.innerHTML = 'SoA: <strong>Live Data · Analysis Ready</strong>';
+                text.innerHTML = `SoA: <strong>Live Data · ${BATCH_ID ? 'Batch' : 'Document'} Ready</strong>`;
             } else {
                 dot.classList.add('mock');
                 text.classList.add('mock');
@@ -1073,14 +1074,35 @@
 
         async function loadDataFromJSON() {
             try {
+                let txnUrl, anaUrl;
+                
+                if (BATCH_ID) {
+                    // Fetch from proxy for batch
+                    txnUrl = `/api/proxy/output/${BATCH_ID}/transactions`;
+                    anaUrl = `/api/proxy/output/${BATCH_ID}/analysis`;
+                } else if (DOC_ID) {
+                    // Fetch from static reports path for document
+                    txnUrl = `/reports/${DOC_ID}/dashboard/transactions.json`;
+                    anaUrl = `/reports/${DOC_ID}/dashboard/analysis.json`;
+                } else {
+                    return 'mock';
+                }
+
                 const [txnResp, anaResp] = await Promise.all([
-                    fetch(`/reports/${DOC_ID}/dashboard/transactions.json`),
-                    fetch(`/reports/${DOC_ID}/dashboard/analysis.json`)
+                    fetch(txnUrl),
+                    fetch(anaUrl)
                 ]);
 
                 if (txnResp.ok && anaResp.ok) {
                     const transData = await txnResp.json();
-                    allTransactions = (transData.transactions || transData).map(t => ({
+                    const transList = transData.transactions || transData;
+                    
+                    if (!Array.isArray(transList)) {
+                        console.error('Invalid transaction data format');
+                        return 'mock';
+                    }
+
+                    allTransactions = transList.map(t => ({
                         id: t.id || `txn${Math.random()}`,
                         date: t.date,
                         merchant: t.merchant,

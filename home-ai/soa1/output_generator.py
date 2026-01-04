@@ -1,58 +1,58 @@
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 
 class OutputGenerator:
-    async def generate_dashboard_json(self, analysis: Dict[str, Any]) -> Dict[str, Any]:
-        if not analysis:
-            return {}
+    async def generate_dashboard_json(
+        self, analysis: Dict[str, Any], batch_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        if analysis is None:
+            analysis = {}
+
+        transactions: List[Dict[str, Any]] = []
+        if batch_id:
+            try:
+                from home_ai.finance_agent.src import storage as fa_storage
+
+                transactions = fa_storage.get_transactions_for_batch(batch_id)
+            except Exception:
+                pass
 
         dashboard = {
-            "summary": analysis.get("summary") or analysis.get("insights") or {},
-            "charts": {
-                "by_category": analysis.get("by_category")
-                or analysis.get("categories")
-                or {},
-                "by_month": analysis.get("by_month") or {},
-                "by_merchant": analysis.get("by_merchant")
-                or analysis.get("top_merchants")
-                or {},
-            },
-            "metrics": {
-                "total_spent": analysis.get("total_spent")
-                or analysis.get("total")
-                or 0,
-                "transaction_count": analysis.get("transaction_count") or 0,
-                "top_category": analysis.get("top_category") or "",
-            },
+            "total_spent": analysis.get("total_spent") or analysis.get("total") or 0,
+            "total_income": analysis.get("total_income") or 0,
+            "transaction_count": analysis.get("transaction_count") or len(transactions),
+            "categories": analysis.get("categories")
+            or analysis.get("by_category")
+            or {},
+            "insights": analysis.get("insights") or [],
+            "recommendations": analysis.get("recommendations") or [],
+            "hidden_drains": analysis.get("hidden_drains") or [],
+            "top_merchants": analysis.get("top_merchants") or [],
+            "date_range": analysis.get("date_range") or {},
+            "transactions": transactions,
         }
         return dashboard
 
-    async def build_pdf_prompt(self, analysis: Dict[str, Any]) -> str:
+    async def build_pdf_command(self, analysis: Dict[str, Any]) -> str:
         if not analysis:
             return ""
 
-        prompt = f"""
-        Generate a professional financial report based on the following analysis:
-        {json.dumps(analysis, indent=2)}
-        
-        Include sections for:
-        - Executive Summary
-        - Category Breakdown
-        - Monthly Trends
-        - Key Recommendations
-        """
-        return prompt.strip()
+        # Placeholder for actual PDF generation command
+        return f"generate_pdf --data '{json.dumps(analysis)}' --output report.pdf"
 
     async def build_infographic_prompt(self, analysis: Dict[str, Any]) -> str:
         if not analysis:
             return ""
 
+        total = analysis.get("total_spent", 0)
+        top_cats = list(analysis.get("categories", {}).keys())[:3]
+
         prompt = f"""
-        Create a visual infographic summary showing:
-        - Total Spending: ${analysis.get("total_spent", 0)}
-        - Top 5 Categories: {analysis.get("top_categories", [])}
-        - Spending Trend: {analysis.get("trend", "stable")}
+        Brutalist infographic design.
+        Central Metric: ${total:,.2f}
+        Key Categories: {", ".join(top_cats)}
+        Style: Neon orange on black background, futuristic, terminal aesthetic.
         """
         return prompt.strip()
 
@@ -60,8 +60,9 @@ class OutputGenerator:
         if not analysis:
             return "No analysis available."
 
-        summary = f"I've analyzed your spending. Total spent: ${analysis.get('total_spent', 0)}. "
-        summary += f"Your top category was {analysis.get('top_category', 'unknown')}."
+        total = analysis.get("total_spent", 0)
+        tx_count = analysis.get("transaction_count", 0)
+        summary = f"I've analyzed your spending. Total spent: ${total:,.2f} across {tx_count} transactions."
         return summary
 
 

@@ -246,6 +246,41 @@
             </div>
         </div>
 
+        <!-- Pipeline Events (Debug Mode) -->
+        <div class="border border-text-brutal-gray mb-6" id="pipelineEventsSection">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center p-4 border-b border-text-brutal-gray space-y-4 md:space-y-0">
+                <div class="flex items-center space-x-3">
+                    <span class="material-symbols-outlined text-accent-neon-orange">timeline</span>
+                    <h2 class="brutal-heading">PIPELINE EVENTS</h2>
+                    <span class="brutal-subtext text-xs">(DEBUG MODE)</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <input id="pipelineBatchFilter" placeholder="batch id filter" class="px-3 py-1 border border-text-brutal-gray bg-transparent brutal-subtext text-xs w-40" />
+                    <button id="pipelinePauseBtn" onclick="togglePipelinePause()" class="border border-text-brutal-gray px-3 py-1 brutal-subtext text-xs hover:border-accent-neon-orange transition-colors">
+                        ⏸ PAUSE
+                    </button>
+                    <button onclick="clearPipelineEvents()" class="border border-text-brutal-gray px-3 py-1 brutal-subtext text-xs hover:border-accent-neon-orange transition-colors">
+                        ✕ CLEAR
+                    </button>
+                </div>
+            </div>
+            <div class="p-4 overflow-x-auto">
+                <table class="w-full" id="pipelineEventsTable">
+                    <thead>
+                        <tr class="border-b border-text-brutal-gray">
+                            <th class="text-left py-2 brutal-subtext text-xs w-24">TIME</th>
+                            <th class="text-left py-2 brutal-subtext text-xs w-32">BATCH</th>
+                            <th class="text-left py-2 brutal-subtext text-xs w-40">EVENT</th>
+                            <th class="text-left py-2 brutal-subtext text-xs">DETAILS</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pipelineEventsBody">
+                        <tr><td colspan="4" class="brutal-subtext py-4 text-center">NO EVENTS YET</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Analysis Jobs -->
         <div class="p-6 border border-text-brutal-gray mb-6">
             <div class="flex items-center justify-between mb-6">
@@ -285,8 +320,11 @@
     <script>
         let currentLogTab = 'webui';
         let logPaused = false;
+        let pipelinePaused = false;
+        let lastPipelineTimestamp = null;
         let statusInterval = null;
         let logInterval = null;
+        let pipelineInterval = null;
 
         async function fetchJSON(url) {
             try {
@@ -298,9 +336,42 @@
             }
         }
 
+        async function controlService(serviceName, action) {
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '...';
+            
+            try {
+                const resp = await fetch('/api/services/control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ service_name: serviceName, action: action })
+                });
+                const data = await resp.json();
+                if (data.status === 'success') {
+                    refreshAll();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (e) {
+                alert('Connection error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
         async function updateSystemStatus() {
             const data = await fetchJSON('/api/services');
-            if (!data) return;
+            if (!data) {
+                document.getElementById('cpuUsage').textContent = 'ERR';
+                document.getElementById('memUsage').textContent = 'ERR';
+                document.getElementById('diskUsage').textContent = 'ERR';
+                document.getElementById('uptime').textContent = 'API ERROR';
+                document.getElementById('servicesStatus').innerHTML = '<div class="brutal-status-stopped">FETCH FAILED</div>';
+                return;
+            }
 
             document.getElementById('cpuUsage').textContent = data.system.cpu_usage.toFixed(1) + '%';
             document.getElementById('memUsage').textContent = data.system.memory_usage.toFixed(1) + '%';
@@ -310,13 +381,29 @@
             const servicesHtml = data.services.map(s => {
                 const statusClass = s.status === 'running' ? 'brutal-status-running' : 
                                    s.status === 'stopped' ? 'brutal-status-stopped' : 'text-text-brutal-gray';
+                
+                // Show control buttons only for implementable services
+                const canControl = ['soa1_api'].includes(s.name);
+                let controlHtml = '';
+                
+                if (canControl) {
+                    if (s.status === 'stopped') {
+                        controlHtml = `<button onclick="controlService('${s.name}', 'start')" class="border border-accent-green text-accent-green px-2 py-0.5 text-[10px] hover:bg-accent-green hover:text-black transition-colors">START</button>`;
+                    } else if (s.status === 'running') {
+                        controlHtml = `<button onclick="controlService('${s.name}', 'stop')" class="border border-accent-red text-accent-red px-2 py-0.5 text-[10px] hover:bg-accent-red hover:text-black transition-colors">STOP</button>`;
+                    }
+                }
+
                 return `
                     <div class="flex justify-between items-center py-2 border-b border-gray-800 last:border-0">
                         <div>
                             <div class="brutal-data text-sm">${s.display_name}</div>
                             <div class="brutal-subtext">PORT ${s.port}</div>
                         </div>
-                        <span class="${statusClass} text-xs font-bold px-2 py-1 border border-current">${s.status.toUpperCase()}</span>
+                        <div class="flex items-center space-x-3">
+                            ${controlHtml}
+                            <span class="${statusClass} text-xs font-bold px-2 py-1 border border-current w-24 text-center">${s.status.toUpperCase()}</span>
+                        </div>
                     </div>
                 `;
             }).join('');
@@ -490,13 +577,13 @@
                 
                 let anomalyHtml = '';
                 if (j.anomaly_count && j.anomaly_count > 0) {
-                    anomalyHtml = `<span class="text-accent-red ml-2" title="${j.anomalies?.map(a => a.description).join('; ') || ''}">⚠ ${j.anomaly_count}</span>`;
+                    anomalyHtml = `<span class="text-accent-red ml-2" title="${j.anomalies?.map(a => a.description).join('; ') || ''}">&#9888; ${j.anomaly_count}</span>`;
                 }
 
                 return `
                     <tr class="border-b border-gray-800 hover:bg-gray-900 cursor-pointer" onclick="toggleJobDetail('job-${idx}')">
                         <td class="py-3 pr-4">
-                            <div class="brutal-data text-xs">${docIdShort} ${j.seeded ? '<span class="px-2 py-1 border border-text-brutal-gray text-xs ml-2'>REPORT</span>' : ''}</div>
+                            <div class="brutal-data text-xs">${docIdShort} ${j.seeded ? '<span class="px-2 py-1 border border-text-brutal-gray text-xs ml-2">REPORT</span>' : ''}</div>
                             <div class="brutal-subtext text-xs">${startTime}</div>
                         </td>
                         <td class="py-3 pr-4">
@@ -596,6 +683,82 @@
             btn.classList.toggle('text-accent-neon-orange', logPaused);
         }
 
+        function togglePipelinePause() {
+            pipelinePaused = !pipelinePaused;
+            const btn = document.getElementById('pipelinePauseBtn');
+            btn.textContent = pipelinePaused ? '▶ RESUME' : '⏸ PAUSE';
+            btn.classList.toggle('border-accent-neon-orange', pipelinePaused);
+            btn.classList.toggle('text-accent-neon-orange', pipelinePaused);
+        }
+
+        function clearPipelineEvents() {
+            document.getElementById('pipelineEventsBody').innerHTML = 
+                '<tr><td colspan="4" class="brutal-subtext py-4 text-center">CLEARED</td></tr>';
+            lastPipelineTimestamp = new Date().toISOString();
+        }
+
+        async function updatePipelineEvents() {
+            if (pipelinePaused) return;
+
+            const batchFilter = document.getElementById('pipelineBatchFilter')?.value || '';
+            let url = '/api/pipeline/events?limit=50';
+            if (lastPipelineTimestamp) {
+                url += `&since=${encodeURIComponent(lastPipelineTimestamp)}`;
+            }
+            if (batchFilter) {
+                url += `&batch_id=${encodeURIComponent(batchFilter)}`;
+            }
+
+            const data = await fetchJSON(url);
+            if (!data || !data.events || data.events.length === 0) return;
+
+            const tbody = document.getElementById('pipelineEventsBody');
+            const existingRows = tbody.querySelectorAll('tr[data-event]');
+            
+            if (existingRows.length === 0 && tbody.querySelector('.brutal-subtext')) {
+                tbody.innerHTML = '';
+            }
+
+            data.events.forEach(evt => {
+                lastPipelineTimestamp = evt.timestamp;
+                
+                const eventTypeColors = {
+                    'batch_upload_start': 'text-accent-neon-orange',
+                    'batch_upload_complete': 'text-accent-green',
+                    'pdf_parse_start': 'text-text-brutal-gray',
+                    'pdf_parse_complete': 'text-accent-green',
+                    'llm_call_start': 'text-accent-neon-orange',
+                    'llm_call_complete': 'text-accent-green',
+                    'transaction_extract_start': 'text-text-brutal-gray',
+                    'transaction_extract_complete': 'text-accent-green',
+                    'error': 'text-accent-red',
+                };
+                const colorClass = eventTypeColors[evt.type] || 'text-text-brutal-light';
+                
+                const time = new Date(evt.timestamp).toLocaleTimeString();
+                const batchShort = evt.batch_id ? evt.batch_id.slice(-12) : '--';
+                const detailsStr = evt.details ? Object.entries(evt.details)
+                    .map(([k, v]) => `<span class="text-text-brutal-gray">${k}:</span> ${v}`)
+                    .join(' | ') : '';
+
+                const row = document.createElement('tr');
+                row.setAttribute('data-event', evt.timestamp);
+                row.className = 'border-b border-gray-800 hover:bg-gray-900';
+                row.innerHTML = `
+                    <td class="py-2 brutal-data text-xs">${time}</td>
+                    <td class="py-2 brutal-subtext text-xs font-mono">${batchShort}</td>
+                    <td class="py-2 brutal-data text-xs ${colorClass}">${evt.type.replace(/_/g, ' ').toUpperCase()}</td>
+                    <td class="py-2 brutal-subtext text-xs">${detailsStr}</td>
+                `;
+                tbody.insertBefore(row, tbody.firstChild);
+            });
+
+            const maxRows = 100;
+            while (tbody.children.length > maxRows) {
+                tbody.removeChild(tbody.lastChild);
+            }
+        }
+
         function refreshLogs() {
             updateLogs();
         }
@@ -619,7 +782,8 @@
                 updateSystemStatus(),
                 updateOllamaStatus(),
                 updateGPUStatus(),
-                updateJobs()
+                updateJobs(),
+                updatePipelineEvents()
             ]);
             updateTimestamp();
         }
@@ -629,6 +793,7 @@
 
         statusInterval = setInterval(refreshAll, 5000);
         logInterval = setInterval(updateLogs, 3000);
+        pipelineInterval = setInterval(updatePipelineEvents, 1000);
     </script>
 </body>
 </html>

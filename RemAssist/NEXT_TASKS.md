@@ -1,75 +1,70 @@
 # 📋 RemAssist — Unified Task Queue
 *Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-_Last updated: January 2, 2026 (Hybrid Calculation Architecture Session)_
+_Last updated: January 3, 2026 (Apple Card Parser Fix Session)_
 
 ---
 
 ## 🔍 Current System Snapshot
 - ✅ **Hybrid Calculation Architecture**: Python calculates (100% accurate), qwen2.5 generates insights (6.3s total)
 - ✅ **Rate Limiting Implemented**: Configured for all public-facing endpoints (10/min for uploads, 20/min for TTS, 100/min for general API).
-- ✅ **Apple Card Fix Implemented**: Logic fixed in `models.py` to correctly trigger specialized extraction prompt, resulting in non-zero metrics.
+- ✅ **Apple Card Extraction FIXED**: State machine parser replaces broken regex, extracts 266+ transactions from 5 PDFs
 - ✅ Working: SOA1 API, WebUI, Ollama, MemLayer, finance pipeline, E2E tests passing
 - ✅ GPU Status: NemoAgent (13GB, GPU 0, 100%), phinance-json (4GB, GPU 1, 100%)
-- ✅ **Progressive Batch Architecture**: Logic complete (WebUI integration complete, backend logic complete).
+- ✅ **Progressive Flow**: Implemented stateful orchestration and instant delivery (Session 27).
+- ✅ **Progressive Flow Phase Separation**: Consent returns immediately, phinance runs in background (Session 29)
 - ✅ **Model Call Logging**: Enhanced with correlation IDs, attempt tracking, and proper source identification.
+- ✅ **Full Batch Persistence**: Compressed text storage (~98% compression), auto-recovery on startup
 
 ---
 
 ## 🚀 Immediate Priority Tasks
 
-### 1. Full Batch State Persistence (Options B/C) - COMPLETED
-**Current State:** Full batch persistence implemented with compressed text storage
-**Implementation:** Compressed extracted text + Phinance analysis JSON in SQLite
+### 1. Refined Output Implementation (Session 28)
+**Goal**: Finalize the generation logic for each report format.
+- [ ] **Dashboard JSON**: Ensure it matches all fields required by `soa_dashboard.html`.
+- [ ] **PDF Export**: Implement the actual `generate_pdf` shell script/tool.
+- [ ] **Infographic**: Integrate with an image generation model (e.g., Z image turbo).
 
-**What was implemented:**
-- Added `extracted_text_gz` BLOB column (gzip compressed text, ~98% compression)
-- Added `phinance_analysis` TEXT column (JSON)
-- Gzip compression helpers: `compress_text()`, `decompress_text()`
-- Persistence functions: `save_batch_extracted_text()`, `save_batch_phinance_analysis()`
-- Hydration: `BatchProcessor.hydrate_from_db()` restores batches on startup
-- Auto-save: Extracted text saved on upload, Phinance analysis saved on completion
+### 2. Merchant Categorization Improvement
+- [ ] Too many transactions falling into "Other" category (65%+ in test)
+- [ ] Expand `_categorize_merchant()` keyword lists
+- [ ] Consider LLM-assisted categorization for unknown merchants
 
-**Files modified:**
-- `home-ai/finance-agent/src/storage.py` — schema + persistence functions
-- `home-ai/soa1/batch_processor.py` — hydration method
-- `home-ai/soa1/api.py` — startup hydration + text persistence on upload
-- `home-ai/soa1/agent.py` — Phinance analysis persistence on completion
-
-**Recovery flow:**
-1. SOA1 startup → `batch_processor.hydrate_from_db(storage)`
-2. Load incomplete batches with `extracted_text_gz`
-3. Decompress text → rebuild `BatchState.phinance_prompt`
-4. If `phinance_analysis` exists → restore and set status=complete
-
-### 2. Progressive Batch Architecture (MAJOR FEATURE)
-**Reference:** `RemAssist/PROGRESSIVE_BATCH_ARCHITECTURE.md`
-
-Complete 5-phase pipeline for batch uploads with parallel processing:
-- [x] **Security Layer** (Priority 1 - required for production)
-- [x] **Batch Processing** (Priority 2 - enables better UX)
-- [x] **Output Pre-generation** (Priority 3 - polish)
-- [x] **WebUI Integration** (Priority 4)
-  - [x] Update `index.html` for batch upload UI
-  - [x] Implement progressive display (Phase 1-5)
-  - [x] Add output selection buttons (Dashboard, PDF, Infographic)
-
-### 2. Pipeline Enhancements
-- [x] Integrate merchant normalization into transaction extraction pipeline
-- [x] Add metrics for retry success rate (phinance_attempts tracked in BatchState)
-- [x] Add input length limits to all API endpoints
-- [x] **Hybrid Calculation Architecture** - Python for math, LLM for insights
-
-### 3. Comprehensive Security Hardening (Deferred)
-- [ ] Comprehensive Security Hardening (API Key Auth, Audit Logging, HTTPS Enforcement) for future development phase.
+### 3. Memory Architecture Upgrade (MAJOR FEATURE)
+- [ ] **Phase 1: Mem0 Setup** (Week 1)
+  - [ ] Install Mem0, configure Kuzu + ChromaDB + Ollama
+  - [ ] Create family entity schema, test extraction
+  - [ ] Integrate with SOA1Agent, replace MemLayer
 
 ---
 
-## 📚 Session Documentation
-- [x] Update `RemAssist/History.md` with current session summary.
-- [x] Update `RemAssist/NEXT_TASKS.md` with final status.
+## 🏁 Recently Completed (Jan 3, 2026 - Session 29)
+- **Session 29**: Progressive Flow Phase Separation
+  - Fixed collapsed phases 2 & 3 - consent now returns immediately
+  - Added `_run_phinance_background()` async function in api.py
+  - Agent returns `trigger_phinance_background` signal for async processing
+  - Enhanced `/api/batch/status/{batch_id}` with `analysis_summary` and `completion_message`
+  - Fixed duplicate "How would you like the report?" prompt (was in both `_run_hybrid_analysis` and `_format_analysis_response`)
+  - Files: agent.py, api.py
 
----
+## 🏁 Recently Completed (Jan 3, 2026 - Session 28)
+- **Session 28**: Apple Card Multi-Line Parser Fix
+  - Root cause: APPLE_CARD_REGEX expected single-line format, but PDFs extract to multi-line
+  - Implemented `_extract_apple_card_transactions()` state machine parser
+  - Handles: date lines, merchant+address lines, cashback %, cashback $, transaction total
+  - Filters: returns, negatives, amounts < $1.00
+  - Results: 266 transactions / $33,455.07 from 5 PDFs (was 0 before)
+  - Fixed f-string syntax error (backslash in expression)
+  - Full E2E test passed: Upload → Extraction → Analysis → Output prompt
+  - Files: batch_processor.py
+
+## 🏁 Recently Completed (Jan 3, 2026 - Session 27)
+- **Session 27**: Refined Agent Flow & Instant Delivery
+  - Implemented stateful orchestration (intent question first)
+  - Added engagement findings during processing
+  - Pre-generated outputs (JSON, PDF command, Image prompt) for instant delivery
+  - Files: api.py, agent.py, batch_processor.py, output_generator.py, soa-webui/main.py
 
 ## 🏁 Recently Completed (Jan 3, 2026 - Session 25)
 - **Session 25**: Full batch persistence with compressed text storage

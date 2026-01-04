@@ -1,9 +1,10 @@
 from fastapi import FastAPI, HTTPException, Response, UploadFile, File, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, validator
 from typing import Optional, Dict, Any, List
+import json
 import yaml
 from collections import defaultdict
 import uvicorn
@@ -29,6 +30,22 @@ from utils.errors import (
     NotFoundError,
 )
 from utils.rate_limiter import get_limiter_for_endpoint
+import requests as http_requests
+
+
+WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:8080")
+
+
+def emit_pipeline_event(event_type: str, batch_id: str = None, details: dict = None):
+    """Send pipeline event to WebUI monitoring dashboard (fire-and-forget)."""
+    try:
+        http_requests.post(
+            f"{WEBUI_URL}/api/pipeline/event",
+            json={"type": event_type, "batch_id": batch_id, "details": details or {}},
+            timeout=1,
+        )
+    except Exception:
+        pass
 
 
 # Input validation limits
@@ -75,14 +92,65 @@ def _get_session_id(request: Request) -> str:
 
 
 def _get_pending_document_context(session_id: str) -> Optional[Dict[str, Any]]:
-    docs = _pending_documents.get(session_id, [])
-    if not docs:
-        return None
-    return {"documents": docs, "session_id": session_id}
+    legacy_docs = _pending_documents.get(session_id, [])
+    if legacy_docs:
+        return {"documents": legacy_docs, "session_id": session_id}
+
+    if CHAT_STORAGE_AVAILABLE:
+        try:
+            batch_info = chat_storage.get_latest_batch_for_session(session_id)
+            if batch_info:
+                batch_id = batch_info["batch_id"]
+                state = batch_processor.get_batch_state(batch_id)
+                if state and state.files:
+                    return {
+                        "batch_id": batch_id,
+                        "documents": state.files,
+                        "session_id": session_id,
+                        "status": state.status,
+                    }
+        except Exception as e:
+            logger.warning(f"Failed to get batch context for session {session_id}: {e}")
+
+    return None
 
 
 def _add_pending_document(session_id: str, doc_metadata: Dict[str, Any]) -> None:
     _pending_documents[session_id].append(doc_metadata)
+
+
+async def _run_phinance_background(
+    batch_id: str, agent: "SOA1Agent", document_context: Dict[str, Any]
+):
+    try:
+        state = batch_processor.get_batch_state(batch_id)
+        if not state:
+            logger.error(f"Batch {batch_id} not found for background phinance")
+            return
+
+        emit_pipeline_event("phinance_background_start", batch_id)
+
+        def _sync_phinance():
+            return agent._invoke_phinance(document_context)
+
+        await asyncio.to_thread(_sync_phinance)
+
+        state.status = "complete"
+        emit_pipeline_event("phinance_background_complete", batch_id)
+        logger.info(f"Background phinance complete for batch {batch_id}")
+
+        asyncio.create_task(
+            batch_processor.pre_generate_outputs(batch_id, output_generator)
+        )
+
+    except Exception as e:
+        logger.error(f"Background phinance failed for {batch_id}: {e}")
+        emit_pipeline_event(
+            "error", batch_id, {"stage": "phinance_background", "error": str(e)}
+        )
+        state = batch_processor.get_batch_state(batch_id)
+        if state:
+            state.status = "failed"
 
 
 # Request/Response Models
@@ -119,6 +187,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     used_memories: list = []
+    redirect_url: Optional[str] = None
 
 
 class PDFUploadRequest(BaseModel):
@@ -285,6 +354,22 @@ def create_app() -> FastAPI:
             )
             logger.info(f"[{client_ip}] Chat response generated successfully")
 
+            if result.get("trigger_phinance_background"):
+                batch_id = result["trigger_phinance_background"]
+                asyncio.create_task(
+                    _run_phinance_background(batch_id, agent, document_context)
+                )
+                logger.info(
+                    f"Started background phinance analysis for batch {batch_id}"
+                )
+
+            if result.get("trigger_output_generation"):
+                batch_id = result["trigger_output_generation"]
+                asyncio.create_task(
+                    batch_processor.pre_generate_outputs(batch_id, output_generator)
+                )
+                logger.info(f"Triggered output pre-generation for batch {batch_id}")
+
             if CHAT_STORAGE_AVAILABLE:
                 chat_storage.save_chat_message(
                     session_id, "assistant", result["answer"]
@@ -293,11 +378,72 @@ def create_app() -> FastAPI:
             return ChatResponse(
                 response=result["answer"],
                 used_memories=result.get("used_memories", []),
+                redirect_url=result.get("redirect_url"),
             )
 
         except Exception as e:
             logger.error(f"[{client_ip}] Chat processing failed: {e}", exc_info=True)
             raise InternalError(f"Chat processing failed: {str(e)}")
+
+    @app.post("/api/chat/stream")
+    async def chat_stream(req: ChatRequest, request: Request):
+        """Streaming chat endpoint - returns SSE stream of chunks"""
+        client_ip = request.client.host
+        session_id = _get_session_id(request)
+        logger.info(
+            f"[{client_ip}] /api/chat/stream called with message: {req.message[:50]}..."
+        )
+        if len(req.message) > MAX_MESSAGE_LENGTH:
+            raise ValidationError(
+                f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH} characters",
+                "message",
+                req.message[:100],
+            )
+
+        async def generate_stream():
+            try:
+                if CHAT_STORAGE_AVAILABLE:
+                    chat_storage.init_db()
+                    chat_storage.save_chat_message(session_id, "user", req.message)
+
+                document_context = _get_pending_document_context(session_id)
+
+                chat_history = []
+                if CHAT_STORAGE_AVAILABLE:
+                    history = chat_storage.get_chat_history(session_id, limit=20)
+                    chat_history = [
+                        {"role": h["role"], "content": h["content"]}
+                        for h in history[:-1]
+                    ]
+
+                response = agent.ask(
+                    req.message,
+                    document_context=document_context,
+                    chat_history=chat_history,
+                )
+                complete_response = response.get("answer", "")
+
+                yield f"data: {json.dumps({'chunk': complete_response})}\n\n"
+                yield f"data: {json.dumps({'done': True})}\n\n"
+
+                if CHAT_STORAGE_AVAILABLE:
+                    chat_storage.save_chat_message(
+                        session_id, "assistant", complete_response
+                    )
+
+            except Exception as e:
+                logger.error(f"[{client_ip}] Stream failed: {e}", exc_info=True)
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.post("/ask", response_model=AskResponse)
     async def ask(req: AskRequest, request: Request):
@@ -321,6 +467,13 @@ def create_app() -> FastAPI:
             document_context = _get_pending_document_context(session_id)
             result = agent.ask(req.query, document_context=document_context)
             logger.info(f"[{client_ip}] Agent response generated successfully")
+
+            if result.get("trigger_output_generation"):
+                batch_id = result["trigger_output_generation"]
+                asyncio.create_task(
+                    batch_processor.pre_generate_outputs(batch_id, output_generator)
+                )
+                logger.info(f"Triggered output pre-generation for batch {batch_id}")
 
             return AskResponse(
                 answer=result["answer"],
@@ -419,10 +572,22 @@ def create_app() -> FastAPI:
         session_id = _get_session_id(request)
         logger.info(f"[{client_ip}] Batch upload requested: {len(files)} files")
 
+        emit_pipeline_event("batch_upload_start", details={"file_count": len(files)})
+
+        # Use a temporary directory to store files for background processing
+        temp_dir = Path("/tmp/soa1_batch_uploads")
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
         processed_files = []
         agent = SOA1Agent()
-        for file in files:
+
+        for idx, file in enumerate(files):
             try:
+                emit_pipeline_event(
+                    "quick_metadata_start",
+                    details={"file": file.filename, "index": idx + 1},
+                )
+
                 content_bytes = await file.read()
                 if len(content_bytes) > MAX_FILE_SIZE:
                     raise ValidationError(
@@ -431,17 +596,22 @@ def create_app() -> FastAPI:
                         file.filename,
                     )
 
-                class _SimpleUpload:
-                    def __init__(self, filename: str, content: bytes):
-                        self.filename = filename
-                        self.file = BytesIO(content)
+                # Save raw bytes to a temporary file for background full parsing
+                temp_file_path = temp_dir / f"{uuid.uuid4().hex}_{file.filename}"
+                with open(temp_file_path, "wb") as f:
+                    f.write(content_bytes)
 
-                result = pdf_processor.process_uploaded_pdf(
-                    _SimpleUpload(file.filename, content_bytes)
-                )
+                # Run quick metadata extraction (<500ms)
+                result = pdf_processor.extract_quick_metadata(str(temp_file_path))
+
                 doc_id = f"doc-{uuid.uuid4().hex[:6]}"
                 file_size_bytes = result.get("file_size_bytes", 0)
-                pages = result.get("pages_processed", 0)
+                pages = result.get("pages", 0)
+
+                emit_pipeline_event(
+                    "quick_metadata_complete",
+                    details={"file": file.filename, "pages": pages, "doc_id": doc_id},
+                )
 
                 if CHAT_STORAGE_AVAILABLE:
                     try:
@@ -457,19 +627,24 @@ def create_app() -> FastAPI:
                         "pages": pages,
                         "size_kb": round(file_size_bytes / 1024, 1),
                         "doc_id": doc_id,
-                        "text_preview": result.get("text_preview", ""),
-                        "full_text": result.get("full_text", ""),
-                        "is_apple_card": result.get("is_apple_card", False),
+                        "temp_path": str(temp_file_path),
+                        "inferred_type": result.get("inferred_type", "document"),
+                        "header_lines": result.get("header_lines", []),
                     }
                 )
             except Exception as e:
                 logger.error(f"Failed to process file {file.filename}: {e}")
+                emit_pipeline_event(
+                    "error", details={"file": file.filename, "error": str(e)}
+                )
 
         batch_id = batch_processor.create_batch(processed_files)
         doc_ids = [f.get("doc_id") for f in processed_files if f.get("doc_id")]
 
-        combined_text = "\n".join(
-            f.get("full_text", f.get("text_preview", "")) for f in processed_files
+        emit_pipeline_event(
+            "batch_created",
+            batch_id=batch_id,
+            details={"file_count": len(processed_files)},
         )
 
         if CHAT_STORAGE_AVAILABLE:
@@ -477,21 +652,36 @@ def create_app() -> FastAPI:
                 chat_storage.save_batch(
                     batch_id, session_id, "uploading", len(processed_files), doc_ids
                 )
-                if combined_text:
-                    chat_storage.save_batch_extracted_text(batch_id, combined_text)
             except Exception as e:
                 logger.warning(f"Failed to persist batch to DB: {e}")
 
-        asyncio.create_task(batch_processor.background_analyze(batch_id, agent))
+        # Kick off background FULL process (extraction + PII redaction + regex)
+        asyncio.create_task(batch_processor.background_full_process(batch_id, agent))
 
+        # Map inferred type to a subject for the intent question
+        doc_types = [f.get("inferred_type", "document") for f in processed_files]
+        if any(
+            t in ["credit_card_statement", "bank_statement", "financial_document"]
+            for t in doc_types
+        ):
+            subject = "finance"
+        elif any(t == "utility_bill" for t in doc_types):
+            subject = "utility"
+        elif any(t == "invoice" for t in doc_types):
+            subject = "billing"
+        else:
+            subject = "document"
+
+        # Pass metadata to agent.ask for engagement
         document_context = {
             "batch_id": batch_id,
             "documents": processed_files,
             "session_id": session_id,
         }
 
+        # Request intent question from LLM based on metadata
         agent_result = agent.ask(
-            query=f"I just uploaded {len(processed_files)} documents.",
+            query="User just uploaded these documents. Acknowledge them specifically and offer relevant options based on the document types and content detected.",
             document_context=document_context,
         )
 
@@ -838,7 +1028,7 @@ def create_app() -> FastAPI:
         if not state:
             raise HTTPException(status_code=404, detail="Batch not found")
 
-        return {
+        response = {
             "batch_id": state.batch_id,
             "status": state.status,
             "file_count": len(state.files),
@@ -855,6 +1045,26 @@ def create_app() -> FastAPI:
             "phinance_complete_at": state.phinance_complete_at,
             "outputs_ready_at": state.outputs_ready_at,
         }
+
+        if state.status == "complete" and state.phinance_analysis:
+            analysis = state.phinance_analysis
+            response["analysis_summary"] = {
+                "total_spent": analysis.get("total_spent"),
+                "categories": analysis.get("categories"),
+                "top_merchants": analysis.get("top_merchants", [])[:5],
+                "hidden_drains_count": len(analysis.get("hidden_drains", [])),
+                "insights": analysis.get("insights", [])[:3],
+            }
+            response["completion_message"] = (
+                f"Analysis complete! I found {state.transaction_count} transactions "
+                f"totaling ${abs(float(analysis.get('total_spent', 0))):,.2f}. "
+                "How would you like the detailed report?\n"
+                "1. 🖥️ Web Dashboard\n"
+                "2. 📄 PDF Export\n"
+                "3. 🎨 Infographic"
+            )
+
+        return response
 
     @app.get("/api/batch/session/{session_id}")
     async def get_session_batch(session_id: str):
@@ -891,32 +1101,45 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Batch not found")
 
         if format == "dashboard":
-            if not state.outputs.get("dashboard_json"):
-                state.outputs[
-                    "dashboard_json"
-                ] = await output_generator.generate_dashboard_json(
-                    state.phinance_analysis
+            data = state.outputs.get("dashboard_json")
+            if not data:
+                analysis = state.phinance_analysis
+                if not analysis:
+                    try:
+                        from home_ai.finance_agent.src import storage as fa_storage
+
+                        analysis = fa_storage.get_batch_phinance_analysis(batch_id)
+                        if analysis:
+                            state.phinance_analysis = analysis
+                    except Exception:
+                        pass
+                if not analysis:
+                    analysis = state.calculated_summary or {}
+                data = await output_generator.generate_dashboard_json(
+                    analysis, batch_id
                 )
-            return state.outputs["dashboard_json"]
+                state.outputs["dashboard_json"] = data
+            return data
 
         elif format == "pdf":
-            if not state.outputs.get("pdf_prompt"):
-                state.outputs["pdf_prompt"] = await output_generator.build_pdf_prompt(
+            command = state.outputs.get("pdf_command")
+            if not command and state.phinance_analysis:
+                command = await output_generator.build_pdf_command(
                     state.phinance_analysis
                 )
-            return {"prompt": state.outputs["pdf_prompt"]}
+                state.outputs["pdf_command"] = command
+            return {"command": command}
 
         elif format == "infographic":
-            if not state.outputs.get("infographic_prompt"):
-                state.outputs[
-                    "infographic_prompt"
-                ] = await output_generator.build_infographic_prompt(
+            prompt = state.outputs.get("infographic_prompt")
+            if not prompt and state.phinance_analysis:
+                prompt = await output_generator.build_infographic_prompt(
                     state.phinance_analysis
                 )
-            return {"prompt": state.outputs["infographic_prompt"]}
+                state.outputs["infographic_prompt"] = prompt
+            return {"prompt": prompt}
 
-        else:
-            raise HTTPException(status_code=400, detail="Invalid format")
+        raise HTTPException(status_code=400, detail="Invalid format")
 
     return app
 

@@ -292,3 +292,91 @@ This section documents the implementation of Progressive Engagement for the SOA1
 
 - `python3 -m py_compile agent.py` ✅
 - `python3 -m py_compile api.py` ✅
+
+---
+
+# Session 6 — Batch Upload UX Investigation
+
+Date: January 3, 2026
+Author: Sisyphus (assistant)
+
+This section documents the investigation and planned fixes for the broken batch upload UX discovered during finance MVP demo testing.
+
+---
+
+## Issue Discovery — Batch Upload UX Violates BATCH_FLOW.md
+
+- **What was observed**
+  - User uploaded 4 Apple Card statements (May, March, June, July 2025)
+  - System returned TWO separate responses instead of one cohesive message
+  - Response 1: "I've received 4 Apple Card statements... Nothing happens unless you say so."
+  - Response 2: "I've processed 4 documents and found 0 transactions. Would you like me to run a detailed analysis?"
+  
+- **Why this is wrong (per BATCH_FLOW.md)**
+  - Phase 1 should return a SINGLE acknowledgment with consent question
+  - Transaction count (0 or otherwise) should NOT be shown until Phase 3 (after consent)
+  - "0 transactions" indicates extraction failed or ran prematurely
+  - No preliminary insights were shown — Phase 3 should display cached insights immediately
+
+- **Impact on user experience**
+  - Fragmented, confusing response flow
+  - User sees "0 transactions" which looks like a failure
+  - Consent asked AFTER showing empty results (backwards)
+  - No value delivered during processing time
+
+---
+
+## Root Cause Analysis
+
+### Issue 1: Two LLM Responses
+
+- **Diagnosis**: The upload handler and/or batch processor is making two separate calls to NemoAgent
+- **Expected**: Single call that acknowledges files and asks for consent
+- **Location to investigate**: `home-ai/soa1/api.py` upload endpoint, `batch_processor.py`
+
+### Issue 2: Transaction Extraction Before Consent
+
+- **Diagnosis**: System attempts to extract transactions during Phase 1 (upload) instead of Phase 2 (background) or Phase 3 (after consent)
+- **Expected**: Phase 1 only stores files and extracts quick metadata (filenames, pages, sizes). Full extraction happens in Phase 2 background task.
+- **Location to investigate**: `api.py` upload handler, `batch_processor.create_batch()` and `background_analyze()`
+
+### Issue 3: "0 Transactions" Displayed
+
+- **Diagnosis**: Either extraction is failing silently, or the count is being shown before extraction runs
+- **Expected**: Transaction count only shown in Phase 3 as part of preliminary insights
+- **Location to investigate**: Agent response generation, `_pending_documents` context formatting
+
+### Issue 4: Phase 2 Not Running
+
+- **Diagnosis**: The background analysis task (`background_analyze()`) may not be starting, or its results aren't being cached
+- **Expected**: While user reads Phase 1 response, background task parses PDFs, extracts transactions, builds `phinance_prompt`
+- **Location to investigate**: `batch_processor.py`, async task execution
+
+### Issue 5: Missing Status Endpoint
+
+- **Diagnosis**: `GET /api/batch/status/{batch_id}` is documented as MISSING in BATCH_FLOW.md
+- **Expected**: Frontend polls this endpoint to detect Phase 2 completion and trigger Phase 3
+- **Location to implement**: `home-ai/soa1/api.py`
+
+---
+
+## Planned Fixes
+
+| Priority | Issue | Fix | Files |
+|----------|-------|-----|-------|
+| P0 | Two responses | Consolidate into single LLM call | `api.py` |
+| P0 | "0 transactions" shown | Remove count from Phase 1 response | `api.py`, `agent.py` |
+| P1 | Phase 2 not running | Verify/fix `background_analyze()` | `batch_processor.py` |
+| P1 | Missing status endpoint | Add `GET /api/batch/status/{batch_id}` | `api.py` |
+| P2 | No preliminary insights | Return cached insights on consent | `agent.py`, `batch_processor.py` |
+
+---
+
+## Implementation Status
+
+- [x] Issue documented in `RemAssist/errors.md`
+- [x] Issue documented in `RemAssist/ACTIONS_DETAILED.md`
+- [ ] Root cause confirmed via code inspection
+- [ ] Fix implemented
+- [ ] Fix verified via demo test
+- [ ] Status updated to RESOLVED in `errors.md`

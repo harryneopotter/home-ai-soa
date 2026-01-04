@@ -721,6 +721,22 @@ def get_incomplete_batches() -> List[Dict[str, Any]]:
         return results
 
 
+def get_transactions_for_batch(batch_id: str) -> List[Dict[str, Any]]:
+    """Fetch all transactions for a batch by looking up its doc_ids."""
+    batch = get_batch(batch_id)
+    if not batch or not batch.get("doc_ids"):
+        return []
+
+    all_transactions = []
+    for doc_id in batch["doc_ids"]:
+        txns = get_transactions_by_doc(doc_id)
+        all_transactions.extend(txns)
+
+    # Sort by date
+    all_transactions.sort(key=lambda x: x.get("date", ""))
+    return all_transactions
+
+
 def get_batch_full(batch_id: str) -> Optional[Dict[str, Any]]:
     """Get batch with all fields including extracted text (decompressed)."""
     with get_db() as conn:

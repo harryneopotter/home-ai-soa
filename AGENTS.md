@@ -5,7 +5,7 @@
 | If your task involves... | Read this FIRST |
 |--------------------------|-----------------|
 | **Any code change** | `RemAssist/IMPLEMENTATION_GUIDE.md` (consent rules) |
-| **Batch upload / file upload** | `RemAssist/BATCH_FLOW.md` (5-phase pipeline) |
+| **Batch upload / file upload / analysis** | `RemAssist/PROGRESSIVE_FLOW.md` ⭐ CANONICAL |
 | **User-facing text / responses** | `RemAssist/LLM_DRIVEN_RESPONSES.md` |
 | **Adding models / GPU features** | `RemAssist/HARDWARE_SPECS.md` (VRAM limits) |
 | **Security / PII / encryption** | `RemAssist/PROGRESSIVE_BATCH_ARCHITECTURE.md` (security section) |
@@ -26,10 +26,12 @@
 2. **`RemAssist/LLM_DRIVEN_RESPONSES.md`** — Communication principle
    - ALL user-facing text comes from LLM, never hardcoded
 
-3. **`RemAssist/BATCH_FLOW.md`** — Upload/batch processing flow
-   - 5-phase progressive pipeline
-   - Required endpoints and state machine
-   - **READ THIS** before touching upload or batch code
+3. **`RemAssist/PROGRESSIVE_FLOW.md`** — Upload/batch/analysis flow ⭐ CANONICAL
+   - 4-phase progressive pipeline with background processing
+   - Transactions extracted by Python regex, NOT LLM
+   - Transactions saved to DB ONLY after consent
+   - Pre-generate outputs while user reads
+   - **READ THIS FIRST** before touching upload, batch, or analysis code
 
 ---
 
@@ -58,8 +60,8 @@
 
 ### Batch Upload Flow
 - **Return immediately, process in background, poll for status**
-- See `RemAssist/BATCH_FLOW.md` for the 5-phase pipeline
-- Missing endpoint: `GET /api/batch/status/{batch_id}`
+- See `RemAssist/PROGRESSIVE_FLOW.md` for the 4-phase pipeline
+- Key: Python regex extracts transactions, LLM provides insights only
 
 ---
 

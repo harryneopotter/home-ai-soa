@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Generator
 import yaml
 from datetime import datetime
 import os, pathlib
@@ -28,6 +28,12 @@ logger = get_logger("agent")
 DEFAULT_ORCHESTRATOR_PROMPT_PATH = "prompts/orchestrator.md"
 
 INVOKE_PATTERN = re.compile(r"\[INVOKE:phinance\]", re.IGNORECASE)
+
+OUTPUT_PATTERNS = {
+    "web": re.compile(r"\b(web|dashboard|1)\b", re.IGNORECASE),
+    "pdf": re.compile(r"\b(pdf|export|2)\b", re.IGNORECASE),
+    "infographic": re.compile(r"\b(infographic|image|3)\b", re.IGNORECASE),
+}
 
 
 def _load_system_prompt(base_dir: str, cfg: dict) -> str:
@@ -129,59 +135,58 @@ class SOA1Agent:
         self, document_context: Optional[Dict[str, Any]]
     ) -> str:
         """
-        Format document metadata into the [DOCUMENT CONTEXT] block
-        that the orchestrator prompt expects.
-
-        Expected document_context structure:
-        {
-            "documents": [
-                {
-                    "filename": "statement.pdf",
-                    "pages": 5,
-                    "size_kb": 245,
-                    "upload_time": "2025-12-27T10:30:00",
-                    "detected_type": "bank_statement",  # optional
-                    "preview_text": "First 200 chars..."  # optional
-                }
-            ],
-            "session_id": "abc123"
-        }
+        Format document metadata and BATCH STATE into the [DOCUMENT CONTEXT] block.
         """
         if not document_context or not document_context.get("documents"):
             return ""
 
+        batch_id = document_context.get("batch_id")
         docs = document_context["documents"]
         lines = ["[DOCUMENT CONTEXT]"]
 
+        if batch_id:
+            lines.append(f"Batch ID: {batch_id}")
+            state = batch_processor.get_batch_state(batch_id)
+            if state:
+                lines.append(f"Processing Status: {state.status}")
+                if state.transaction_count > 0:
+                    lines.append(f"Transactions Found: {state.transaction_count}")
+                if state.interesting_findings:
+                    lines.append("Preliminary Findings:")
+                    for finding in state.interesting_findings:
+                        lines.append(f"  - {finding}")
+
+        lines.append("Files in this session:")
         for i, doc in enumerate(docs, 1):
             filename = doc.get("filename", "unknown")
             pages = doc.get("pages", "unknown")
-            size_kb = doc.get("size_kb", "unknown")
-            detected_type = doc.get("detected_type", "")
-            preview = doc.get("preview_text", "")
+            inferred_type = doc.get("inferred_type", "")
 
-            lines.append(f"Document {i}: {filename}")
-            lines.append(f"  - Pages: {pages}")
-            lines.append(f"  - Size: {size_kb} KB")
+            lines.append(
+                f"Document {i}: {filename} ({pages} pages, type: {inferred_type})"
+            )
 
-            if detected_type:
-                lines.append(f"  - Detected type: {detected_type}")
-
-            if preview:
-                truncated = preview[:200] + "..." if len(preview) > 200 else preview
-                lines.append(f"  - Preview: {truncated}")
+            headers = doc.get("header_lines", [])
+            if headers:
+                preview = "\\n".join(headers[:3])
+                lines.append(f"  Headers: {preview}")
 
         lines.append("[/DOCUMENT CONTEXT]")
         return "\n".join(lines)
 
     def _invoke_phinance(self, document_context: Optional[Dict[str, Any]]) -> str:
-        """Invoke phinance with hybrid approach: Python calculates, LLM provides insights."""
         if not document_context or not document_context.get("documents"):
             return "I don't have any documents loaded to analyze. Please upload a document first."
 
         try:
+            batch_id = document_context.get("batch_id")
             docs = document_context.get("documents", [])
             doc_ids = [d.get("doc_id") for d in docs if d.get("doc_id")]
+
+            if batch_id:
+                state = batch_processor.get_batch_state(batch_id)
+                if state and state.extracted_transactions:
+                    return self._process_with_batch_state(state, doc_ids)
 
             if not doc_ids:
                 return "No document IDs found. Please upload a document first."
@@ -208,38 +213,90 @@ class SOA1Agent:
                     "Would you like me to extract the transactions?"
                 )
 
-            calculated = calculate_financials(all_transactions)
-            logger.info(
-                f"Calculated financials: total=${calculated['total_spent']}, "
-                f"categories={len(calculated['categories'])}, "
-                f"merchants={len(calculated['top_merchants'])}"
-            )
-
-            insights_prompt = build_insights_prompt(all_transactions, calculated)
-            logger.info(f"Invoking insights model (qwen2.5) with pre-calculated data")
-
-            from models import call_insights_model
-
-            raw_response = call_insights_model(insights_prompt)
-
-            try:
-                cleaned_response = strip_markdown_fences(raw_response)
-                llm_insights = json.loads(cleaned_response)
-            except json.JSONDecodeError:
-                llm_insights = {
-                    "insights": [],
-                    "recommendations": [],
-                    "potential_savings": 0,
-                    "verified_drains": [],
-                }
-
-            analysis = merge_calculated_with_llm_response(calculated, llm_insights)
-
-            return self._format_analysis_response(analysis, len(all_transactions))
+            return self._run_hybrid_analysis(all_transactions)
 
         except Exception as e:
             logger.error(f"Phinance invocation failed: {e}")
             return f"I encountered an issue while analyzing your documents: {str(e)}"
+
+    def _process_with_batch_state(self, state, doc_ids: List[str]) -> str:
+        all_transactions = state.extracted_transactions
+        if not all_transactions:
+            return "No transactions were extracted from your documents. They may not contain recognizable transaction data."
+
+        if not state.transactions_persisted and doc_ids:
+            try:
+                from home_ai.finance_agent.src import storage as fa_storage
+
+                for doc_id in doc_ids:
+                    doc_txns = [t for t in all_transactions]
+                    if doc_txns:
+                        fa_storage.save_transactions_for_doc(doc_id, doc_txns)
+                        logger.info(
+                            f"Persisted {len(doc_txns)} transactions for {doc_id}"
+                        )
+                state.transactions_persisted = True
+                state.consent_given_at = time.time()
+            except Exception as e:
+                logger.warning(f"Failed to persist transactions: {e}")
+
+        all_transactions = normalize_transactions(all_transactions)
+
+        if state.calculated_summary:
+            calculated = state.calculated_summary
+        else:
+            calculated = calculate_financials(all_transactions)
+            state.calculated_summary = calculated
+
+        logger.info(
+            f"Using batch state: total=${calculated['total_spent']}, "
+            f"categories={len(calculated['categories'])}, tx_count={len(all_transactions)}"
+        )
+
+        return self._run_hybrid_analysis(all_transactions, calculated, state)
+
+    def _run_hybrid_analysis(
+        self,
+        transactions: List[Dict],
+        calculated: Optional[Dict] = None,
+        state: Optional[Any] = None,
+    ) -> str:
+        if not calculated:
+            calculated = calculate_financials(transactions)
+
+        logger.info(
+            f"Calculated financials: total=${calculated['total_spent']}, "
+            f"categories={len(calculated['categories'])}, "
+            f"merchants={len(calculated['top_merchants'])}"
+        )
+
+        insights_prompt = build_insights_prompt(transactions, calculated)
+        logger.info("Invoking insights model (qwen2.5) with pre-calculated data")
+
+        from models import call_insights_model
+
+        raw_response = call_insights_model(insights_prompt)
+
+        try:
+            cleaned_response = strip_markdown_fences(raw_response)
+            llm_insights = json.loads(cleaned_response)
+        except json.JSONDecodeError:
+            llm_insights = {
+                "insights": [],
+                "recommendations": [],
+                "potential_savings": 0,
+                "verified_drains": [],
+            }
+
+        analysis = merge_calculated_with_llm_response(calculated, llm_insights)
+
+        if state:
+            state.phinance_analysis = analysis
+            state.phinance_complete_at = time.time()
+
+        analysis_text = self._format_analysis_response(analysis, len(transactions))
+
+        return analysis_text
 
     def _format_analysis_response(self, analysis: Dict[str, Any], tx_count: int) -> str:
         """Format phinance analysis results into user-friendly text."""
@@ -308,8 +365,14 @@ class SOA1Agent:
                 lines.append(f"  • {insights}")
             lines.append("")
 
+        # Phase 3: Ask for output format
+        lines.append("📋 **How would you like the detailed report?**")
+        lines.append("  1. 🖥️ Web Dashboard")
+        lines.append("  2. 📄 PDF Export")
+        lines.append("  3. 🎨 Infographic")
+        lines.append("")
         lines.append(
-            "Would you like me to break down a specific category or show more details?"
+            "Just say 'web', 'pdf', or 'infographic' (or ask me any other questions)."
         )
         return "\n".join(lines)
 
@@ -479,16 +542,104 @@ class SOA1Agent:
             raise ServiceError("model", f"Model inference failed: {str(e)}")
 
         # 5. Check for [INVOKE:phinance] tag and handle specialist routing
-        if INVOKE_PATTERN.search(answer):
+        is_invoke = INVOKE_PATTERN.search(answer)
+
+        # BACKUP CATCH: If the LLM forgot the tag but the user asked for analysis
+        # and we are in the 'ready' state, force it.
+        if not is_invoke and document_context and document_context.get("batch_id"):
+            state = batch_processor.get_batch_state(document_context["batch_id"])
+            if state and state.status == "ready":
+                trigger_keywords = ["analyze", "analysis", "breakdown", "spending"]
+                if any(kw in query.lower() for kw in trigger_keywords):
+                    logger.info("Backup catch triggered: Forcing [INVOKE:phinance]")
+                    is_invoke = True
+
+        if is_invoke:
             logger.info("Detected [INVOKE:phinance] signal - routing to phinance")
             answer_without_tag = INVOKE_PATTERN.sub("", answer).strip()
+
+            # If the response looks like a hallucinated report (contains multiple $ signs or numbers)
+            # and the tag was missing (triggered by backup catch), or it's just too long,
+            # sanitize it to keep only the engagement part.
+            if ("$" in answer_without_tag and answer_without_tag.count("$") > 2) or len(
+                answer_without_tag
+            ) > 300:
+                logger.warning(
+                    "Discarding potential hallucinated LLM report in engagement message"
+                )
+                answer_without_tag = "Starting your analysis now! I'll have the results for you in a few seconds."
+
+            batch_id = document_context.get("batch_id") if document_context else None
+            if batch_id:
+                state = batch_processor.get_batch_state(batch_id)
+                if state and state.status == "ready":
+                    findings_text = ""
+                    if state.interesting_findings:
+                        findings_text = "\n\n**While I analyze the details, here's what I noticed:**\n"
+                        for finding in state.interesting_findings:
+                            findings_text += f"• {finding}\n"
+
+                    if answer_without_tag:
+                        answer = f"{answer_without_tag}{findings_text}\n\nI'm running the deep analysis now - I'll have the full report ready in a few seconds."
+                    else:
+                        answer = f"Starting your analysis now!{findings_text}\n\nI'll have the full report ready in a few seconds."
+
+                    state.status = "analyzing"
+
+                    return {
+                        "answer": answer,
+                        "used_memories": memories,
+                        "trigger_phinance_background": batch_id,
+                    }
+
             phinance_result = self._invoke_phinance(document_context)
             if answer_without_tag:
                 answer = f"{answer_without_tag}\n\n{phinance_result}"
             else:
                 answer = phinance_result
 
-        # 5. Write new factual memory (with explicit time)
+        # 6. Check for output format selection
+        if document_context and document_context.get("batch_id"):
+            batch_id = document_context["batch_id"]
+            state = batch_processor.get_batch_state(batch_id)
+
+            # Only allow format selection if analysis is complete
+            if state and state.status == "complete":
+                for format_name, pattern in OUTPUT_PATTERNS.items():
+                    if pattern.search(query):
+                        logger.info(
+                            f"Detected request for {format_name} output for batch {batch_id}"
+                        )
+
+                        if format_name == "web":
+                            answer = f"Opening your interactive Web Report for batch {batch_id}..."
+                            # We'll return this extra field for the API to handle the redirect
+                            redirect_url = f"/dashboard/batch/{batch_id}"
+
+                            return {
+                                "answer": answer,
+                                "used_memories": memories,
+                                "redirect_url": redirect_url,
+                            }
+                        elif format_name == "pdf":
+                            answer = "I'm preparing your PDF report. It will be ready for download in a few seconds."
+                            # Trigger pre-generation if not already done
+                            if not state.outputs_ready:
+                                asyncio.create_task(
+                                    batch_processor.pre_generate_outputs(
+                                        batch_id, output_generator
+                                    )
+                                )
+                        elif format_name == "infographic":
+                            answer = "I'm generating your visual infographic. I'll let you know as soon as it's ready."
+                            if not state.outputs_ready:
+                                asyncio.create_task(
+                                    batch_processor.pre_generate_outputs(
+                                        batch_id, output_generator
+                                    )
+                                )
+
+        # 7. Write new factual memory (with explicit time)
         try:
             timestamp = datetime.utcnow()
 
@@ -514,7 +665,67 @@ class SOA1Agent:
             # Non-critical failure - continue
 
         # 6. Return agent output
-        return {
+        result = {
             "answer": answer,
             "used_memories": memories,
         }
+
+        # Signal for Phase 3: output pre-generation if phinance completed
+        if document_context and document_context.get("batch_id"):
+            batch_id = document_context["batch_id"]
+            state = batch_processor.get_batch_state(batch_id)
+            if state and state.phinance_analysis and not state.outputs_ready:
+                result["trigger_output_generation"] = batch_id
+
+        return result
+
+    def ask_stream(
+        self,
+        query: str,
+        document_context: Optional[Dict[str, Any]] = None,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+    ) -> Generator[str, None, None]:
+        """Streaming version of ask - yields response chunks."""
+        if not query or not isinstance(query, str):
+            yield "Error: Query must be a non-empty string"
+            return
+
+        if len(query) > 1000:
+            yield "Error: Query too long (max 1000 chars)"
+            return
+
+        logger.info(f"SOA1 streaming query: {query}")
+
+        memories = []
+        try:
+            memories = self.memory.search_memory(query)
+        except Exception as e:
+            logger.warning(f"Memory search failed (continuing without): {e}")
+
+        memory_context = self._format_memory_context(memories)
+        doc_context_block = self._format_document_context(document_context)
+
+        convo = []
+        if chat_history:
+            for msg in chat_history:
+                if msg.get("role") in ("user", "assistant") and msg.get("content"):
+                    convo.append({"role": msg["role"], "content": msg["content"]})
+
+        content_parts = []
+        if doc_context_block:
+            content_parts.append(doc_context_block)
+        content_parts.append(
+            f"Here is relevant context from past memories:\n{memory_context}"
+        )
+        content_parts.append(
+            f"Now answer the following question for the user:\n{query}"
+        )
+
+        convo.append({"role": "user", "content": "\n\n".join(content_parts)})
+
+        try:
+            for chunk in self.model.chat_stream(self.system_prompt, convo):
+                yield chunk
+        except Exception as e:
+            logger.error(f"Streaming model call failed: {e}")
+            yield f"\n\nError: {str(e)}"

@@ -210,6 +210,10 @@ class SimplePDFProcessor:
 
             word_count = len(text_content.split())
 
+            # Infer document type for the response
+            header_lines = text_content.splitlines()[:10]
+            inferred_type = self._infer_document_type(header_lines, uploaded_file.filename)
+
             encrypted_text = self.storage.encrypt(text_content)
 
             return {
@@ -224,6 +228,7 @@ class SimplePDFProcessor:
                 "encrypted_text": encrypted_text,
                 "file_size_bytes": file_size_bytes,
                 "is_apple_card": is_apple_card,
+                "inferred_type": inferred_type,
             }
 
         except Exception as e:

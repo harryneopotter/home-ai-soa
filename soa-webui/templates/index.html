@@ -44,7 +44,7 @@
             line-height: 1.75rem;
         }
         .brutal-subtext {
-            color: #CCCCCC;
+            color: #AAAAAA;
             font-family: 'Space Mono', monospace;
             font-size: 0.75rem;
             line-height: 1rem;
@@ -136,22 +136,22 @@
             <div class="flex items-center space-x-6 text-[9px] uppercase tracking-wider">
                 <div class="flex items-center space-x-2">
                     <span id="webuiStatus" class="w-2 h-2 rounded-full bg-accent-neon-orange animate-pulse"></span>
-                    <span class="text-gray-400">WebUI</span>
+                    <span class="text-gray-300">WebUI</span>
                 </div>
                 <div class="flex items-center space-x-2">
                     <span id="apiStatus" class="w-2 h-2 rounded-full bg-accent-neon-orange animate-pulse"></span>
-                    <span class="text-gray-400">SOA1 API</span>
+                    <span class="text-gray-300">SOA1 API</span>
                 </div>
                 <div class="flex items-center space-x-2">
                     <span id="ollamaStatus" class="w-2 h-2 rounded-full bg-accent-neon-orange animate-pulse"></span>
-                    <span class="text-gray-400">Ollama</span>
+                    <span class="text-gray-300">Ollama</span>
                 </div>
                 <div class="flex items-center space-x-2">
                     <span id="modelsStatus" class="w-2 h-2 rounded-full bg-accent-neon-orange animate-pulse"></span>
-                    <span class="text-gray-400">Models</span>
+                    <span class="text-gray-300">Models</span>
                 </div>
             </div>
-            <div id="statusMessage" class="text-[9px] text-gray-600 uppercase tracking-wider"></div>
+            <div id="statusMessage" class="text-[9px] text-gray-400 uppercase tracking-wider"></div>
         </div>
     </div>
 
@@ -186,8 +186,8 @@
                     
                     <div id="uploadArea" class="border border-dashed border-gray-500 p-6 text-center hover:border-accent-neon-orange transition-colors cursor-pointer relative mb-4">
                         <input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept=".pdf" multiple onchange="handleFileSelect(this)">
-                        <span class="material-symbols-outlined text-3xl text-gray-400 mb-2">add_circle</span>
-                        <div class="text-[10px] text-gray-500 uppercase tracking-tighter">DROP PDFs OR CLICK</div>
+                        <span class="material-symbols-outlined text-3xl text-gray-300 mb-2">add_circle</span>
+                        <div class="text-[10px] text-gray-300 uppercase tracking-tighter">DROP PDFs OR CLICK</div>
                         <div id="fileName" class="text-accent-neon-orange mt-2 text-[10px] font-bold truncate hidden"></div>
                     </div>
 
@@ -250,6 +250,9 @@
             }
         }
 
+        // --- Animated uploading indicator ---
+        let uploadStatusInterval = null;
+
         async function uploadFile() {
             const input = document.getElementById('fileInput');
             const btn = document.getElementById('uploadBtn');
@@ -264,6 +267,15 @@
             btn.textContent = `UPLOADING ${totalFiles} FILES...`;
             status.className = 'mt-4 text-[10px] p-2 border border-accent-neon-orange text-accent-neon-orange';
             status.classList.remove('hidden');
+
+            // Start animated uploading indicator
+            let dots = 0;
+            status.textContent = 'UPLOADING';
+            if (uploadStatusInterval) clearInterval(uploadStatusInterval);
+            uploadStatusInterval = setInterval(() => {
+                dots = (dots + 1) % 4;
+                status.textContent = 'UPLOADING' + '.'.repeat(dots);
+            }, 400);
 
             const formData = new FormData();
             files.forEach(file => {
@@ -290,6 +302,7 @@
 
                 } else {
                     appendMessage('agent', `ERROR: Batch upload failed (${response.status_code}): ${data.message || 'Unknown error'}`);
+                    if (uploadStatusInterval) { clearInterval(uploadStatusInterval); uploadStatusInterval = null; }
                     status.textContent = `ERROR: Batch upload failed.`;
                     status.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
                     btn.disabled = false;
@@ -297,6 +310,7 @@
                 }
             } catch (e) {
                 appendMessage('agent', `ERROR: Failed to connect to API: ${e.message}`);
+                if (uploadStatusInterval) { clearInterval(uploadStatusInterval); uploadStatusInterval = null; }
                 status.textContent = `ERROR: Failed to connect to API.`;
                 status.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
                 btn.disabled = false;
@@ -305,6 +319,7 @@
 
             input.value = '';
             document.getElementById('fileName').classList.add('hidden');
+            if (uploadStatusInterval) { clearInterval(uploadStatusInterval); uploadStatusInterval = null; }
         }
 
         async function pollBatchStatus(batchId, totalFiles) {
@@ -319,44 +334,36 @@
                     
                     statusEl.textContent = `BATCH ${batchId} STATUS: ${status.toUpperCase()}`;
                     
-                    if (status === 'ready') {
-                        clearInterval(interval);
-                        statusEl.textContent = `BATCH READY: Awaiting your consent to analyze.`;
-                        statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-neon-orange text-accent-neon-orange';
-                        
-                        const insights = data.preliminary_insights || {};
-                        const txCount = data.transaction_count || 0;
-                        const findings = data.interesting_findings || [];
-                        
-                        let msg = `I've processed ${totalFiles} documents and found ${txCount} transactions.\n\n`;
-                        if (findings.length > 0) {
-                            msg += `**Quick observations:**\n`;
-                            findings.slice(0, 3).forEach(f => { msg += `• ${f}\n`; });
-                            msg += `\n`;
-                        }
-                        msg += `Would you like me to run a detailed analysis? Just say "yes" or "analyze".`;
-                        
-                        appendMessage('agent', msg);
-                        btn.disabled = false;
-                        btn.textContent = 'UPLOAD BATCH';
+                if (status === 'ready') {
+                    clearInterval(interval);
+                    if (uploadStatusInterval) { clearInterval(uploadStatusInterval); uploadStatusInterval = null; }
+                    // Status bar update only - NO hardcoded message
+                    // The LLM response in the initial upload already contains the consent question
+                    statusEl.textContent = `BATCH READY: Awaiting your consent to analyze.`;
+                    statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-neon-orange text-accent-neon-orange';
+                    btn.disabled = false;
+                    btn.textContent = 'UPLOAD BATCH';
                         
                     } else if (status === 'complete' || status === 'consent_granted') {
                         if (data.outputs_ready) {
                             clearInterval(interval);
+                            if (uploadStatusInterval) { clearInterval(uploadStatusInterval); uploadStatusInterval = null; }
+                            // Status bar update only - analysis results come from LLM via chat
                             statusEl.textContent = `ANALYSIS COMPLETE: ${totalFiles} files processed.`;
                             statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-green text-accent-green';
-                            appendMessage('agent', `✅ Analysis complete. You can now view the consolidated dashboard or ask questions about your spending.`);
                             btn.disabled = false;
                             btn.textContent = 'UPLOAD BATCH';
                         }
                     } else if (status === 'failed') {
                         clearInterval(interval);
+                        if (uploadStatusInterval) { clearInterval(uploadStatusInterval); uploadStatusInterval = null; }
                         statusEl.textContent = `ANALYSIS FAILED. Check logs.`;
                         statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
                         btn.disabled = false;
                         btn.textContent = 'UPLOAD BATCH';
                     } else if (status === 'not_found' || status === 'error') {
                         clearInterval(interval);
+                        if (uploadStatusInterval) { clearInterval(uploadStatusInterval); uploadStatusInterval = null; }
                         statusEl.textContent = `BATCH ERROR: ${data.error || 'Not found'}`;
                         statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
                         btn.disabled = false;
@@ -364,6 +371,7 @@
                     }
                 } catch (e) {
                     clearInterval(interval);
+                    if (uploadStatusInterval) { clearInterval(uploadStatusInterval); uploadStatusInterval = null; }
                     statusEl.textContent = `POLLING ERROR. Check console.`;
                     statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
                     btn.disabled = false;
@@ -373,9 +381,42 @@
         }
 
         function handleEnter(e) {
-            if (e.key === 'Enter') sendMessage();
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
         }
 
+        // Streaming: create agent message bubble and return content element to stream into
+        function appendStreamingMessage(role) {
+            const history = document.getElementById('chatHistory');
+            // Clear placeholder on first message
+            if (history.querySelector('.opacity-10')) {
+                history.innerHTML = '';
+            }
+            const div = document.createElement('div');
+            div.className = `chat-msg ${role}`;
+            const label = document.createElement('div');
+            label.className = 'text-[8px] uppercase tracking-widest mb-1 opacity-70 font-bold';
+            label.textContent = role === 'user' ? 'Local User' : 'SOA1 Core';
+            div.appendChild(label);
+            const content = document.createElement('div');
+            content.className = 'text-sm leading-relaxed';
+            content.style.whiteSpace = 'pre-wrap';
+            div.appendChild(content);
+            history.appendChild(div);
+            history.scrollTop = history.scrollHeight;
+            return content;
+        }
+
+        // Streaming: append chunk to content element, auto-scroll
+        function appendToStream(contentEl, chunk) {
+            contentEl.innerText += chunk;
+            const history = document.getElementById('chatHistory');
+            history.scrollTop = history.scrollHeight;
+        }
+
+        // Streaming sendMessage
         async function sendMessage() {
             const input = document.getElementById('messageInput');
             const text = input.value.trim();
@@ -384,25 +425,94 @@
             appendMessage('user', text);
             input.value = '';
 
+            // Create agent message bubble and get content element
+            const contentEl = appendStreamingMessage('agent');
+
+            try {
+                const response = await fetch('/api/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+
+                if (!response.ok || !response.body) {
+                    appendToStream(contentEl, 'ERROR: CORE DISCONNECTED.');
+                    return;
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // Process all complete lines
+                    let lines = buffer.split('\n');
+                    buffer = lines.pop(); // Save incomplete line for next chunk
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.chunk) {
+                                    appendToStream(contentEl, data.chunk);
+                                }
+                                if (data.done) {
+                                    // Optionally handle stream completion
+                                }
+                                if (data.error) {
+                                    appendToStream(contentEl, `ERROR: ${data.error}`);
+                                }
+                            } catch (e) {
+                                appendToStream(contentEl, 'ERROR: Bad stream data.');
+                            }
+                        }
+                    }
+                }
+                // Handle any trailing buffer (in case last chunk is not newline-terminated)
+                if (buffer.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(buffer.slice(6));
+                        if (data.chunk) {
+                            appendToStream(contentEl, data.chunk);
+                        }
+                        if (data.done) {
+                            // Optionally handle stream completion
+                        }
+                        if (data.error) {
+                            appendToStream(contentEl, `ERROR: ${data.error}`);
+                        }
+                    } catch (e) {
+                        appendToStream(contentEl, 'ERROR: Bad stream data.');
+                    }
+                }
+            } catch (e) {
+                appendToStream(contentEl, 'ERROR: CORE DISCONNECTED.');
+            }
+        }
+
+        // Original non-streaming fallback
+        async function sendMessageSync() {
+            const input = document.getElementById('messageInput');
+            const text = input.value.trim();
+            if (!text) return;
+
+            appendMessage('user', text);
+            input.value = '';
+
+            const msgDiv = appendStreamingMessage('agent');
             try {
                 const response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ message: text })
                 });
-
                 const data = await response.json();
-                
-                if (data.response) {
-                    appendMessage('agent', data.response);
-                } else if (data.answer) { 
-                     appendMessage('agent', data.answer);
-                } else {
-                    appendMessage('agent', 'ERROR: EMPTY RESPONSE FROM CORE.');
-                }
-
+                appendToStream(msgDiv, data.response || 'ERROR: No response.');
             } catch (e) {
-                appendMessage('agent', 'ERROR: CORE DISCONNECTED.');
+                appendToStream(msgDiv, 'ERROR: CORE DISCONNECTED.');
             }
         }
 

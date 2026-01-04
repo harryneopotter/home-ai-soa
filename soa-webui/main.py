@@ -5,6 +5,7 @@ Main web application for monitoring and controlling SOA1 services
 """
 
 from fastapi import FastAPI, Request, HTTPException, Depends, UploadFile, File
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBearer
@@ -54,6 +55,11 @@ class SystemStatus(BaseModel):
     disk_usage: float = 0.0
     uptime: str = ""
     tailscale_ip: Optional[str] = None
+
+
+class ServiceAction(BaseModel):
+    service_name: str
+    action: str  # "start", "stop"
 
 
 class Config:
@@ -318,19 +324,16 @@ def home(request: Request):
 
 
 @app.get("/dashboard/{doc_id}")
-def analysis_dashboard(request: Request, doc_id: str, style: Optional[str] = None):
+def analysis_dashboard(request: Request, doc_id: str):
     """Detailed Analysis Dashboard for a specific document"""
     client_ip = request.client.host
 
     if not check_access(client_ip):
         raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
 
-    template_name = "analysis_dashboard.html"
-    if style == "soa":
-        template_name = "soa_dashboard.html"
-
+    # Use soa_dashboard.html as the primary UI
     return templates.TemplateResponse(
-        template_name,
+        "soa_dashboard.html",
         {
             "request": request,
             "doc_id": doc_id,
@@ -338,18 +341,35 @@ def analysis_dashboard(request: Request, doc_id: str, style: Optional[str] = Non
     )
 
 
-@app.get("/dashboard/consolidated")
-def consolidated_dashboard(request: Request):
-    """Consolidated dashboard showing all analyzed documents"""
+@app.get("/dashboard/batch/{batch_id}")
+def batch_dashboard(request: Request, batch_id: str):
+    """Detailed Analysis Dashboard for a batch of documents"""
     client_ip = request.client.host
 
     if not check_access(client_ip):
         raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
 
     return templates.TemplateResponse(
-        "consolidated_dashboard.html",
-        {"request": request},
+        "soa_dashboard.html",
+        {
+            "request": request,
+            "batch_id": batch_id,
+        },
     )
+
+
+# @app.get("/dashboard/consolidated")
+# def consolidated_dashboard(request: Request):
+#     """Consolidated dashboard showing all analyzed documents"""
+#     client_ip = request.client.host
+#
+#     if not check_access(client_ip):
+#         raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
+#
+#     return templates.TemplateResponse(
+#         "consolidated_dashboard.html",
+#         {"request": request},
+#     )
 
 
 @app.get("/services")
@@ -418,6 +438,24 @@ def status_page(request: Request):
     )
 
 
+@app.get("/monitoring")
+def monitoring_page(request: Request):
+    """Real-time monitoring dashboard with pipeline events"""
+    client_ip = request.client.host
+
+    if not check_access(client_ip):
+        raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
+
+    return templates.TemplateResponse(
+        "monitoring.html",
+        {
+            "request": request,
+            "title": "SOA1 Monitoring",
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        },
+    )
+
+
 @app.get("/api/services")
 def api_services():
     """API endpoint for service status"""
@@ -448,6 +486,58 @@ def api_services():
             "tailscale_ip": system_status.tailscale_ip,
         },
     }
+
+
+@app.post("/api/services/control")
+async def control_service(action: ServiceAction, request: Request):
+    """Start or stop a service"""
+    client_ip = request.client.host
+    if not check_access(client_ip):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    import subprocess
+
+    service_name = action.service_name
+    action_type = action.action
+
+    logger.info(f"Service control: {service_name} -> {action_type}")
+
+    scripts_dir = Path("/home/ryzen/projects/scripts")
+
+    # Map service names to scripts
+    service_scripts = {
+        "soa1_api": {
+            "start": scripts_dir / "start-soa1.sh",
+            "stop": scripts_dir / "stop-soa1.sh",
+        }
+    }
+
+    if service_name not in service_scripts:
+        return {
+            "status": "error",
+            "message": f"Control not implemented for {service_name}",
+        }
+
+    script = service_scripts[service_name].get(action_type)
+    if not script or not script.exists():
+        return {"status": "error", "message": f"Script not found for {action_type}"}
+
+    try:
+        # Run the script
+        result = subprocess.run(
+            ["bash", str(script)], capture_output=True, text=True, timeout=10
+        )
+
+        if result.returncode == 0:
+            return {
+                "status": "success",
+                "message": f"Service {service_name} {action_type}ed",
+            }
+        else:
+            return {"status": "error", "message": result.stderr or "Script failed"}
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @app.get("/health")
@@ -503,6 +593,145 @@ def api_status():
         pass
 
     return status
+
+
+@app.get("/api/ollama/status")
+def api_ollama_status():
+    try:
+        r = requests.get("http://localhost:11434/api/tags", timeout=3)
+        if not r.ok:
+            return {"running": False, "error": "Not responding"}
+
+        tags_data = r.json()
+        models = tags_data.get("models", [])
+
+        ps_resp = requests.get("http://localhost:11434/api/ps", timeout=3)
+        loaded_models = []
+        if ps_resp.ok:
+            ps_data = ps_resp.json()
+            for m in ps_data.get("models", []):
+                loaded_models.append(
+                    {
+                        "name": m.get("name", "unknown"),
+                        "size": m.get("size", 0),
+                        "size_vram": m.get("size_vram", 0),
+                    }
+                )
+
+        version = None
+        try:
+            v_resp = requests.get("http://localhost:11434/api/version", timeout=2)
+            if v_resp.ok:
+                version = v_resp.json().get("version")
+        except:
+            pass
+
+        return {
+            "running": True,
+            "version": version,
+            "models": [m.get("name") for m in models],
+            "loaded_models": loaded_models,
+        }
+    except Exception as e:
+        return {"running": False, "error": str(e)}
+
+
+@app.get("/api/gpu/status")
+def api_gpu_status():
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,temperature.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return {"available": False, "error": "nvidia-smi failed"}
+
+        gpus = []
+        for line in result.stdout.strip().split("\n"):
+            if not line.strip():
+                continue
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) >= 6:
+                gpus.append(
+                    {
+                        "index": int(parts[0]),
+                        "name": parts[1],
+                        "memory_used_mb": int(parts[2]),
+                        "memory_total_mb": int(parts[3]),
+                        "utilization_pct": int(parts[4]),
+                        "temperature_c": int(parts[5]),
+                    }
+                )
+
+        return {"available": True, "gpus": gpus}
+    except FileNotFoundError:
+        return {"available": False, "error": "nvidia-smi not found"}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@app.get("/api/logs/tail/{log_name}")
+def api_logs_tail(log_name: str, lines: int = 100):
+    log_files = {
+        "webui": "logs/api.log",
+        "model_calls": "logs/model.log",
+        "soa1_api": "../home-ai/soa1/logs/api.log",
+    }
+
+    if log_name not in log_files:
+        return {"error": f"Unknown log: {log_name}", "lines": []}
+
+    log_path = Path(__file__).parent / log_files[log_name]
+    if not log_path.exists():
+        return {"error": f"Log file not found: {log_path}", "lines": []}
+
+    try:
+        with open(log_path, "r") as f:
+            all_lines = f.readlines()
+            tail_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+            return {"lines": [l.rstrip() for l in tail_lines]}
+    except Exception as e:
+        return {"error": str(e), "lines": []}
+
+
+@app.get("/api/analysis/jobs")
+def api_analysis_jobs():
+    jobs = []
+    reports_dir = Path(__file__).parent / "reports"
+
+    if reports_dir.exists():
+        for doc_dir in reports_dir.iterdir():
+            if doc_dir.is_dir():
+                analysis_file = doc_dir / "dashboard" / "analysis.json"
+                if analysis_file.exists():
+                    try:
+                        import json
+
+                        with open(analysis_file) as f:
+                            data = json.load(f)
+                        jobs.append(
+                            {
+                                "doc_id": doc_dir.name,
+                                "status": "completed",
+                                "transaction_count": data.get("transaction_count", 0),
+                                "started_at": data.get("analysis_timestamp"),
+                                "completed_at": data.get("analysis_timestamp"),
+                                "duration_s": data.get("processing_time_seconds", 0),
+                            }
+                        )
+                    except:
+                        pass
+
+    jobs.sort(key=lambda x: x.get("completed_at") or "", reverse=True)
+    return {"jobs": jobs[:50]}
 
 
 # =============================================================================
@@ -1063,7 +1292,17 @@ async def api_chat(request: Request):
     try:
         body = await request.json()
         soa1_url = config.services.get("api", "http://localhost:8001")
-        resp = requests.post(f"{soa1_url}/api/chat", json=body, timeout=120)
+
+        # Forward original IP and session ID
+        client_ip = request.headers.get("X-Forwarded-For") or request.client.host
+        headers = {
+            "X-Session-ID": request.headers.get("X-Session-ID") or client_ip,
+            "X-Forwarded-For": client_ip,
+        }
+
+        resp = requests.post(
+            f"{soa1_url}/api/chat", json=body, headers=headers, timeout=120
+        )
         return resp.json()
     except Exception as e:
         logger.error(f"Chat proxy error: {e}")
@@ -1073,8 +1312,55 @@ async def api_chat(request: Request):
         }
 
 
+@app.post("/api/chat/stream")
+async def api_chat_stream(request: Request):
+    """Proxy streaming chat requests to SOA1 API (SSE)."""
+    try:
+        body = await request.json()
+        soa1_url = config.services.get("api", "http://localhost:8001")
+
+        # Forward original IP and session ID
+        client_ip = request.headers.get("X-Forwarded-For") or request.client.host
+        headers = {
+            "X-Session-ID": request.headers.get("X-Session-ID") or client_ip,
+            "X-Forwarded-For": client_ip,
+            "Content-Type": "application/json",
+        }
+
+        def stream_generator():
+            try:
+                with requests.post(
+                    f"{soa1_url}/api/chat/stream",
+                    json=body,
+                    headers=headers,
+                    stream=True,
+                    timeout=120,
+                ) as resp:
+                    for line in resp.iter_lines():
+                        if line:
+                            yield line.decode() + "\n"
+            except Exception as e:
+                logger.error(f"Chat stream error: {e}")
+                yield f'data: {{"error": "{str(e)}"}}\n'
+
+        return StreamingResponse(
+            stream_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering if present
+            },
+        )
+    except Exception as e:
+        logger.error(f"Chat stream setup error: {e}")
+        return StreamingResponse(
+            iter([f'data: {{"error": "{str(e)}"}}\n']), media_type="text/event-stream"
+        )
+
+
 @app.post("/api/proxy/upload")
-async def api_proxy_upload(file: UploadFile = File(...)):
+async def api_proxy_upload(request: Request, file: UploadFile = File(...)):
     """Proxy file upload to SOA1 API."""
     try:
         soa1_url = config.services.get("api", "http://localhost:8001")
@@ -1085,8 +1371,17 @@ async def api_proxy_upload(file: UploadFile = File(...)):
         # Prepare files dict for requests
         files = {"file": (file.filename, content, file.content_type)}
 
+        # Forward session ID or original IP
+        client_ip = request.headers.get("X-Forwarded-For") or request.client.host
+        headers = {
+            "X-Session-ID": request.headers.get("X-Session-ID") or client_ip,
+            "X-Forwarded-For": client_ip,
+        }
+
         # Forward to SOA1 API
-        resp = requests.post(f"{soa1_url}/upload-pdf", files=files, timeout=120)
+        resp = requests.post(
+            f"{soa1_url}/upload-pdf", files=files, headers=headers, timeout=120
+        )
 
         # Return response
         return resp.json()
@@ -1096,7 +1391,7 @@ async def api_proxy_upload(file: UploadFile = File(...)):
 
 
 @app.post("/api/proxy/upload-batch")
-async def api_proxy_upload_batch(files: List[UploadFile] = File(...)):
+async def api_proxy_upload_batch(request: Request, files: List[UploadFile] = File(...)):
     """Proxy batch file upload to SOA1 API's /upload-batch endpoint."""
     try:
         soa1_url = config.services.get("api", "http://localhost:8001")
@@ -1111,8 +1406,18 @@ async def api_proxy_upload_batch(files: List[UploadFile] = File(...)):
                 )
             )
 
+        # Forward session ID or original IP
+        client_ip = request.headers.get("X-Forwarded-For") or request.client.host
+        headers = {
+            "X-Session-ID": request.headers.get("X-Session-ID") or client_ip,
+            "X-Forwarded-For": client_ip,
+        }
+
         resp = requests.post(
-            f"{soa1_url}/upload-batch", files=files_to_send, timeout=120
+            f"{soa1_url}/upload-batch",
+            files=files_to_send,
+            headers=headers,
+            timeout=120,
         )
         resp.raise_for_status()
         return resp.json()
@@ -1136,7 +1441,95 @@ async def api_proxy_upload_batch(files: List[UploadFile] = File(...)):
         return {"status": "error", "message": f"Batch upload failed: {str(e)}"}
 
 
+@app.get("/api/proxy/output/{batch_id}/{format}")
+async def api_proxy_output(batch_id: str, format: str):
+    """Proxy output retrieval to SOA1 API."""
+    try:
+        soa1_url = config.services.get("api", "http://localhost:8001")
+
+        # Map dashboard keywords to SOA1 format types
+        actual_format = format
+        if format == "transactions":
+            actual_format = "dashboard"  # Both are derived from 'dashboard' output
+        elif format == "analysis":
+            actual_format = "dashboard"
+
+        resp = requests.get(
+            f"{soa1_url}/api/output/{batch_id}/{actual_format}", timeout=10
+        )
+
+        if not resp.ok:
+            return {"status": "error", "message": f"SOA1 error: {resp.status_code}"}
+
+        data = resp.json()
+
+        # If the dashboard wants separate transactions/analysis, we slice the data here
+        if format == "transactions":
+            return {"transactions": data.get("transactions", [])}
+        elif format == "analysis":
+            # Remove the transactions list to keep the analysis object lean
+            analysis_only = {k: v for k, v in data.items() if k != "transactions"}
+            return analysis_only
+
+        return data
+    except Exception as e:
+        logger.error(f"Output proxy error: {e}")
+        return {"status": "error", "message": f"Failed to retrieve output: {str(e)}"}
+
+
 _batch_status: Dict[str, Dict[str, Any]] = {}
+
+# Pipeline events store for monitoring UI (circular buffer, last 500 events)
+_pipeline_events: List[Dict[str, Any]] = []
+_pipeline_events_max = 500
+
+
+def emit_pipeline_event(
+    event_type: str, batch_id: str = None, details: Dict[str, Any] = None
+):
+    """Add a pipeline event to the in-memory store for monitoring UI."""
+    global _pipeline_events
+    event = {
+        "timestamp": datetime.now().isoformat(),
+        "type": event_type,
+        "batch_id": batch_id,
+        "details": details or {},
+    }
+    _pipeline_events.append(event)
+    if len(_pipeline_events) > _pipeline_events_max:
+        _pipeline_events = _pipeline_events[-_pipeline_events_max:]
+
+
+@app.get("/api/pipeline/events")
+async def get_pipeline_events(
+    since: str = None, batch_id: str = None, limit: int = 100
+):
+    """Get recent pipeline events for monitoring UI. Optionally filter by timestamp or batch_id."""
+    events = _pipeline_events
+
+    if batch_id:
+        events = [e for e in events if e.get("batch_id") == batch_id]
+
+    if since:
+        events = [e for e in events if e.get("timestamp", "") > since]
+
+    return {"events": events[-limit:], "total": len(events)}
+
+
+@app.post("/api/pipeline/event")
+async def post_pipeline_event(request: Request):
+    """Receive pipeline events from SOA1 API (internal use)."""
+    try:
+        data = await request.json()
+        emit_pipeline_event(
+            event_type=data.get("type", "unknown"),
+            batch_id=data.get("batch_id"),
+            details=data.get("details", {}),
+        )
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Failed to record pipeline event: {e}")
+        return {"status": "error", "error": str(e)}
 
 
 @app.get("/api/batch/status")

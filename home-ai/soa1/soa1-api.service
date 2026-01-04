@@ -1,0 +1,15 @@
+[Unit]
+Description=SOA1 API Service
+After=network.target ollama.service
+
+[Service]
+Type=simple
+User=ryzen
+WorkingDirectory=/home/ryzen/projects/home-ai/soa1
+Environment=PYTHONPATH=/home/ryzen/projects
+ExecStart=/usr/bin/python3 /home/ryzen/projects/home-ai/soa1/api.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

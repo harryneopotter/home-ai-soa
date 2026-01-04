@@ -248,17 +248,20 @@ def build_insights_prompt(
         date_info = f"Date range: {dr['start']} to {dr['end']}"
 
     drain_lines = []
-    for d in summary.get("hidden_drains", [])[:5]:
+    drains = summary.get("hidden_drains", [])[:5]
+    for i, d in enumerate(drains, 1):
         drain_lines.append(
-            f"  - {d['merchant']}: ${d['avg_amount']:.2f} avg × {d['frequency']} times = ${d['total_period']:.2f} (${d['annual_cost']:.2f}/year projected)"
+            f"  {i}. {d['merchant']}: ${d['avg_amount']:.2f} avg × {d['frequency']} times = ${d['total_period']:.2f} (${d['annual_cost']:.2f}/year projected)"
         )
 
     drains_section = ""
+    drains_task = ""
     if drain_lines:
         drains_section = f"""
 ### Potential Hidden Drains (small recurring charges <$50, 3+ times):
 {chr(10).join(drain_lines)}
 """
+        drains_task = f"""4. drain_verifications: Review each numbered drain above. For each, determine if it's a TRUE drain (discretionary/wasteful) or FALSE (necessary expense). Return object with drain numbers as keys: {{"1": {{"is_drain": true, "reason": "brief explanation"}}, "2": {{"is_drain": false, "reason": "..."}}}}"""
 
     prompt = f"""Analyze this financial data and provide insights.
 
@@ -281,35 +284,36 @@ Based on the above ACCURATE numbers, provide:
 1. insights: 3-5 specific observations about spending patterns (reference the percentages and amounts above)
 2. recommendations: 2-3 actionable money-saving suggestions
 3. potential_savings: estimated monthly savings if recommendations are followed
-4. verified_drains: Review the "Potential Hidden Drains" above. For each one, determine if it's a TRUE drain (discretionary/wasteful) or FALSE (necessary recurring expense like utilities, subscriptions you actually use). Return array of {{"merchant": "...", "is_drain": true/false, "reason": "brief explanation"}}
+{drains_task}
 
 Respond with valid JSON only:
-{{"insights": ["...", "..."], "recommendations": ["...", "..."], "potential_savings": 0.00, "verified_drains": [{{"merchant": "...", "is_drain": true, "reason": "..."}}]}}
+{{"insights": ["...", "..."], "recommendations": ["...", "..."], "potential_savings": 0.00, "drain_verifications": {{"1": {{"is_drain": true, "reason": "..."}}, "2": {{"is_drain": false, "reason": "..."}}}}}}
 """
     return prompt
 
 
 def merge_calculated_with_llm_response(
-    calculated: Dict[str, Any], llm_response: Dict[str, Any]
+    calculated: Dict[str, Any],
+    llm_response: Dict[str, Any],
+    transactions: List[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Merge Python-calculated numbers with LLM-generated insights.
 
     Args:
         calculated: Output from calculate_financials()
-        llm_response: Parsed JSON from Phinance (insights, recommendations)
+        llm_response: Parsed JSON from LLM (insights, recommendations, drain_verifications)
+        transactions: Optional raw transaction list to include in output
 
     Returns:
         Complete analysis dict with accurate numbers and qualitative insights
     """
-    verified_drains = llm_response.get("verified_drains", [])
+    drain_verifications = llm_response.get("drain_verifications", {})
 
-    hidden_drains = calculated.get("hidden_drains", [])
-    for drain in hidden_drains:
-        verification = next(
-            (v for v in verified_drains if v.get("merchant") == drain.get("merchant")),
-            None,
-        )
+    hidden_drains = calculated.get("hidden_drains", [])[:5]
+    for i, drain in enumerate(hidden_drains):
+        key = str(i + 1)
+        verification = drain_verifications.get(key)
         if verification:
             drain["is_drain"] = verification.get("is_drain", True)
             drain["llm_reason"] = verification.get("reason", "")
@@ -317,7 +321,7 @@ def merge_calculated_with_llm_response(
             drain["is_drain"] = True
             drain["llm_reason"] = "Not verified by LLM"
 
-    return {
+    result = {
         "total_spent": calculated.get("total_spent", 0),
         "transaction_count": calculated.get("transaction_count", 0),
         "categories": calculated.get("categories", {}),
@@ -329,3 +333,8 @@ def merge_calculated_with_llm_response(
         "recommendations": llm_response.get("recommendations", []),
         "potential_savings": llm_response.get("potential_savings", 0),
     }
+
+    if transactions:
+        result["transactions"] = transactions
+
+    return result
