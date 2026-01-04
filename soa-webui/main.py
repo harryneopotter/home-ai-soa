@@ -189,6 +189,7 @@ def get_service_status() -> List[ServiceStatus]:
             "port": 8001,
             "url": config.services.get("api", "http://localhost:8001"),
             "required": True,
+            "cmdline_match": "soa1/api.py",
         },
         {
             "name": "soa_webui",
@@ -196,6 +197,7 @@ def get_service_status() -> List[ServiceStatus]:
             "port": 8080,
             "url": "http://localhost:8080",
             "required": True,
+            "cmdline_match": "soa-webui/main.py",
         },
         {
             "name": "ollama",
@@ -203,6 +205,7 @@ def get_service_status() -> List[ServiceStatus]:
             "port": 11434,
             "url": "http://localhost:11434",
             "required": True,
+            "cmdline_match": "ollama",
         },
     ]
 
@@ -217,10 +220,11 @@ def get_service_status() -> List[ServiceStatus]:
 
         try:
             # Check if process is running
+            cmdline_match = service_def.get("cmdline_match", service.name)
             for proc in psutil.process_iter(["pid", "name", "cmdline"]):
                 try:
                     cmdline = " ".join(proc.info["cmdline"] or [])
-                    if service.name in cmdline or str(service.port) in cmdline:
+                    if cmdline_match in cmdline:
                         service.pid = proc.info["pid"]
                         service.cpu_usage = proc.cpu_percent(interval=0.1)
                         service.memory_usage = (
