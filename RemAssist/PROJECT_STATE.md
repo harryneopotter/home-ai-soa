@@ -1,7 +1,7 @@
 # SOA1 Project State - January 2026
 
-**Version**: 2.2  
-**Last Updated**: January 2, 2026 (Session 24)  
+**Version**: 2.4  
+**Last Updated**: January 4, 2026 (Session 32)  
 **Hardware**: Intel X670 + 2x NVIDIA RTX 5060 Ti (16GB each, 32GB total VRAM)
 
 > ⚠️ **For batch/upload work**: See `RemAssist/BATCH_FLOW.md` for the 5-phase progressive pipeline.
@@ -196,10 +196,11 @@ Results available in consolidated dashboard
 ### WebUI
 | File | Purpose |
 |------|---------|
-| `soa-webui/main.py` | FastAPI dashboard, analysis pipeline |
+| `soa-webui/main.py` | FastAPI dashboard, analysis pipeline, PDF export |
 | `soa-webui/reports.py` | Consolidated reports API |
 | `soa-webui/templates/index.html` | Chat interface |
 | `soa-webui/templates/consolidated_dashboard.html` | Finance dashboard |
+| `soa-webui/templates/pdf_report.html` | A4 print-optimized PDF template |
 
 ---
 
@@ -242,8 +243,9 @@ transactions (
   description TEXT,
   amount REAL,
   category TEXT,
-  merchant TEXT,
-  raw_merchant TEXT,
+  merchant TEXT,         -- Normalized display name
+  raw_merchant TEXT,     -- Original from PDF
+  merchant_stable_id TEXT, -- sha256 hash for graph linkage
   created_at TIMESTAMP
 )
 
@@ -407,7 +409,7 @@ tail -f /home/ryzen/projects/soa-webui/logs/soa-webui.log
 
 ---
 
-## Current Status (January 2, 2026)
+## Current Status (January 4, 2026)
 
 ### ✅ Working
 - PDF upload and document tracking
@@ -416,10 +418,12 @@ tail -f /home/ryzen/projects/soa-webui/logs/soa-webui.log
 - [INVOKE:phinance] tag detection and routing
 - Transaction extraction pipeline
 - Consolidated finance dashboard
+- **PDF Export** - WeasyPrint generates A4 reports from `/export/pdf/{batch_id}`
+- **Merchant Stable IDs** - sha256 hash for graph-safe linkage (survives dictionary updates)
 - LLM response validation with retry
 - Chat history persistence
 - Cross-document comparison
-- Merchant normalization (40+ patterns)
+- Merchant normalization (40+ patterns, versioned dictionary)
 - Security hardening (XSS, path traversal)
 - Progressive single-file upload (`/upload-pdf` returns in ~30ms)
 

@@ -1,3 +1,93 @@
+### January 4, 2026 - Merchant Stable IDs & Normalization Fix (Session 32)
+
+#### Problem Solved
+1. **Merchant names in PDF export were raw** (e.g., "AMZN MKTP US*ABC123" instead of "Amazon")
+2. **No stable linkage for future graph memory** - dictionary changes would break historical links
+
+#### Root Cause
+- `normalize_transactions()` was called AFTER `save_transactions_for_doc()` in agent.py
+- Transactions saved to DB had raw merchant names
+- No stable identifier existed for merchants across dictionary versions
+
+#### Solution Implemented
+
+**Fix 1: Normalization Order**
+- Moved `normalize_transactions()` call BEFORE `save_transactions_for_doc()` in agent.py
+- Fixed `storage.py` to properly save `merchant` (normalized) vs `raw_merchant` (original)
+
+**Fix 2: Stable IDs (per security-cleanup-feedback.md)**
+- Added `compute_merchant_stable_id()` - sha256 hash of canonicalized merchant name
+- Added `MERCHANT_DICT_VERSION = "1.0.0"` for tracking dictionary changes
+- Normalizer now returns 4-tuple: `(name, category, confidence, stable_id)`
+- `normalize_transactions()` adds `merchant_stable_id` and `merchant_dict_version` to each transaction
+- DB schema updated with `merchant_stable_id` column + migration
+
+#### Key Design Decision
+Following feedback from `security-cleanup-feedback.md`:
+- **Display names can change** as dictionary improves
+- **Stable IDs never change** - sha256(canonical_name) remains constant
+- Future graph memory nodes keyed by stable IDs won't break when display names update
+
+#### Files Modified
+| File | Change |
+|------|--------|
+| `home-ai/soa1/agent.py` | Moved normalize before save, removed hardcoded responses |
+| `home-ai/finance-agent/src/storage.py` | Fixed raw_merchant saving, added merchant_stable_id column |
+| `home-ai/soa1/utils/merchant_normalizer.py` | Added stable ID computation, dict version tracking |
+
+#### Commits
+- `147a5b3` - fix: normalize merchants before DB save, remove hardcoded responses
+- `fc66b7f` - feat: add merchant_stable_id for graph-safe linkage
+
+---
+
+### January 4, 2026 - PDF Export Feature (Session 31)
+
+#### Feature Added
+Complete PDF export pipeline - user clicks "📄 PDF Export" button, agent returns download URL, frontend triggers file download.
+
+#### Implementation
+
+| Component | File | Change |
+|-----------|------|--------|
+| PDF Endpoint | `soa-webui/main.py` | Added `GET /export/pdf/{batch_id}` - queries SQLite, renders template, WeasyPrint converts to PDF |
+| PDF Template | `soa-webui/templates/pdf_report.html` | A4 print-optimized layout with metrics cards, category bars, top merchants, transaction table |
+| Agent | `home-ai/soa1/agent.py` | Returns `download_url: "/export/pdf/{batch_id}"` when PDF format selected |
+| API Model | `home-ai/soa1/api.py` | Added `download_url` field to `ChatResponse` model |
+| API Streaming | `home-ai/soa1/api.py` | Pass `download_url` through in streaming `done` payload |
+| Frontend | `soa-webui/templates/index.html` | Handle `download_url` - create anchor element, trigger click for download |
+
+#### Flow
+```
+User clicks "📄 PDF Export" → sends "pdf export" message
+    ↓
+Agent detects PDF format intent, finds active batch
+    ↓
+Returns: {"answer": "Generating your PDF...", "download_url": "/export/pdf/batch-xxx"}
+    ↓
+API streaming passes download_url in done payload
+    ↓
+Frontend receives download_url, creates <a> element, triggers click
+    ↓
+Browser downloads PDF via /export/pdf/{batch_id}
+    ↓
+WeasyPrint renders pdf_report.html → PDF (22KB typical)
+```
+
+#### PDF Report Contents
+- **Header**: Title, subtitle, date range
+- **Metrics Cards**: Total spending, transaction count, categories, merchants
+- **Spending by Category**: Horizontal bar chart with percentages
+- **Top Merchants**: 2-column grid with amounts
+- **Transaction Details**: Table with last 50 transactions (date, merchant, category, amount)
+- **Footer**: Batch ID, generation timestamp
+
+#### Dependencies
+- WeasyPrint (`pip install weasyprint`) - HTML to PDF conversion
+- Already installed on system
+
+---
+
 ### January 4, 2026 - Self-Spawning Phinance Analysis (Session 30)
 
 #### Problem Solved

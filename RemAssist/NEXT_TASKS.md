@@ -1,11 +1,13 @@
 # 📋 RemAssist — Unified Task Queue
 *Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-_Last updated: January 4, 2026 (Self-Spawning Phinance Session)_
+_Last updated: January 4, 2026 (Session 32 - Merchant Stable IDs)_
 
 ---
 
 ## 🔍 Current System Snapshot
+- ✅ **Merchant Stable IDs**: Graph-safe linkage with sha256 hash, survives dictionary updates
+- ✅ **PDF Export**: Full pipeline - WeasyPrint generates A4 reports, agent returns download_url, frontend triggers download
 - ✅ **Self-Spawning Phinance**: Agent spawns own background thread, no API cooperation needed
 - ✅ **Hybrid Calculation Architecture**: Python calculates (100% accurate), qwen2.5 generates insights (6.3s total)
 - ✅ **Rate Limiting Implemented**: Configured for all public-facing endpoints (10/min for uploads, 20/min for TTS, 100/min for general API).
@@ -24,7 +26,7 @@ _Last updated: January 4, 2026 (Self-Spawning Phinance Session)_
 ### 1. Refined Output Implementation (Session 28)
 **Goal**: Finalize the generation logic for each report format.
 - [ ] **Dashboard JSON**: Ensure it matches all fields required by `soa_dashboard.html`.
-- [ ] **PDF Export**: Implement the actual `generate_pdf` shell script/tool.
+- [x] **PDF Export**: ✅ Implemented with WeasyPrint (Session 31)
 - [ ] **Infographic**: Integrate with an image generation model (e.g., Z image turbo).
 
 ### 2. Merchant Categorization Improvement
@@ -39,6 +41,25 @@ _Last updated: January 4, 2026 (Self-Spawning Phinance Session)_
   - [ ] Integrate with SOA1Agent, replace MemLayer
 
 ---
+
+## 🏁 Recently Completed (Jan 4, 2026 - Session 32)
+- **Session 32**: Merchant Stable IDs & Normalization Fix
+  - Fixed merchant normalization order - now normalizes BEFORE saving to DB
+  - Added `merchant_stable_id` (sha256 hash) for graph-safe linkage
+  - Added `MERCHANT_DICT_VERSION` tracking (1.0.0)
+  - DB schema updated with `merchant_stable_id` column + migration
+  - Per `security-cleanup-feedback.md`: stable IDs survive dictionary updates
+  - Commits: `147a5b3`, `fc66b7f`
+  - Files: agent.py, storage.py, merchant_normalizer.py
+
+## 🏁 Recently Completed (Jan 4, 2026 - Session 31)
+- **Session 31**: PDF Export Feature Complete
+  - Added `/export/pdf/{batch_id}` endpoint in soa-webui using WeasyPrint
+  - Created `pdf_report.html` template - A4 print-optimized with metrics, categories, merchants, transactions
+  - Agent returns `download_url` when user requests PDF export
+  - API streaming passes `download_url` through to frontend
+  - Frontend triggers file download when `download_url` received
+  - Files: soa-webui/main.py, soa-webui/templates/pdf_report.html, home-ai/soa1/agent.py, home-ai/soa1/api.py, soa-webui/templates/index.html
 
 ## 🏁 Recently Completed (Jan 4, 2026 - Session 30)
 - **Session 30**: Self-Spawning Phinance Analysis
