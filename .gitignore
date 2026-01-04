@@ -152,3 +152,42 @@ session-ses_*.md
 pdf-parser*.md
 phi-fail.txt
 *.jpg
+
+# External repo clones (reference only, not part of project)
+MemGPT/
+Personal_AI_Infrastructure/
+cognee/
+letta/
+mem0/
+zep/
+
+# Debug/temp output files
+agentreply.txt
+chat-fail.txt
+test_pure.txt
+local-ai-improve.md
+localai-improve.txt
+soa-webui/output.txt
+
+# Screenshots (temp)
+*.png
+!assets/*.png
+
+# Security keys - NEVER commit
+soa1/security/.key
+*.key
+!*.pub.key
+
+# Duplicate/scratch docs at root
+security-cleanup-feedback.md
+
+# Old planning files
+plan/History*.md
+plan/map/
+plan/memory/
+
+# Empty/legacy symlinks
+home-ai/finance_agent
+home_ai
+llamafarm_clean
+src
