@@ -366,6 +366,101 @@ def batch_dashboard(request: Request, batch_id: str):
 #     )
 
 
+@app.get("/export/pdf/{batch_id}")
+def export_pdf(request: Request, batch_id: str):
+    """Generate PDF report for a batch"""
+    from weasyprint import HTML
+    from io import BytesIO
+    import sqlite3
+
+    client_ip = request.client.host
+    if not check_access(client_ip):
+        raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
+
+    db_path = (
+        Path(__file__).parent.parent
+        / "home-ai"
+        / "finance-agent"
+        / "data"
+        / "finance.db"
+    )
+    if not db_path.exists():
+        db_path = Path(__file__).parent.parent / "data" / "finance.db"
+
+    if not db_path.exists():
+        raise HTTPException(status_code=404, detail="Database not found")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    cur.execute(
+        "SELECT * FROM transactions WHERE doc_id LIKE ? ORDER BY date DESC",
+        (f"%{batch_id}%",),
+    )
+    rows = cur.fetchall()
+    transactions = [dict(r) for r in rows]
+
+    if not transactions:
+        cur.execute("SELECT * FROM transactions ORDER BY date DESC LIMIT 100")
+        rows = cur.fetchall()
+        transactions = [dict(r) for r in rows]
+
+    conn.close()
+
+    total_spent = sum(t.get("amount", 0) for t in transactions)
+
+    categories = {}
+    for t in transactions:
+        cat = t.get("category", "other") or "other"
+        categories[cat] = categories.get(cat, 0) + t.get("amount", 0)
+    categories = dict(sorted(categories.items(), key=lambda x: x[1], reverse=True))
+
+    merchant_totals = {}
+    for t in transactions:
+        m = t.get("merchant") or t.get("raw_merchant") or "Unknown"
+        merchant_totals[m] = merchant_totals.get(m, 0) + t.get("amount", 0)
+    top_merchants = [
+        {"merchant": k, "total": v}
+        for k, v in sorted(merchant_totals.items(), key=lambda x: x[1], reverse=True)[
+            :10
+        ]
+    ]
+
+    date_range = {}
+    if transactions:
+        dates = [t.get("date") for t in transactions if t.get("date")]
+        if dates:
+            date_range = {"start": min(dates), "end": max(dates)}
+
+    template_data = {
+        "request": request,
+        "batch_id": batch_id,
+        "total_spent": total_spent,
+        "transaction_count": len(transactions),
+        "categories": categories,
+        "top_merchants": top_merchants,
+        "transactions": transactions,
+        "insights": [],
+        "date_range": date_range,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+    html_content = templates.get_template("pdf_report.html").render(**template_data)
+
+    pdf_buffer = BytesIO()
+    HTML(string=html_content, base_url=str(Path(__file__).parent)).write_pdf(pdf_buffer)
+    pdf_buffer.seek(0)
+
+    filename = f"phinance_report_{batch_id}_{datetime.now().strftime('%Y%m%d')}.pdf"
+
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @app.get("/services")
 def services_page(request: Request):
     """Detailed services page"""

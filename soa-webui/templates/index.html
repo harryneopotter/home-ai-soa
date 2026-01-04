@@ -534,6 +534,17 @@
                                     if (data.redirect_url) {
                                         setTimeout(() => window.open(data.redirect_url, '_blank'), 500);
                                     }
+                                    if (data.download_url) {
+                                        // Trigger file download
+                                        setTimeout(() => {
+                                            const a = document.createElement('a');
+                                            a.href = data.download_url;
+                                            a.download = '';
+                                            document.body.appendChild(a);
+                                            a.click();
+                                            document.body.removeChild(a);
+                                        }, 500);
+                                    }
                                 }
                                 if (data.error) {
                                     if (firstChunk) {
@@ -569,6 +580,17 @@
                             }
                             if (data.redirect_url) {
                                 setTimeout(() => window.open(data.redirect_url, '_blank'), 500);
+                            }
+                            if (data.download_url) {
+                                // Trigger file download
+                                setTimeout(() => {
+                                    const a = document.createElement('a');
+                                    a.href = data.download_url;
+                                    a.download = '';
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    document.body.removeChild(a);
+                                }, 500);
                             }
                         }
                         if (data.error) {

@@ -661,14 +661,14 @@ class SOA1Agent:
                                 "redirect_url": redirect_url,
                             }
                         elif format_name == "pdf":
-                            answer = "I'm preparing your PDF report. It will be ready for download in a few seconds."
-                            # Trigger pre-generation if not already done
-                            if not state.outputs_ready:
-                                asyncio.create_task(
-                                    batch_processor.pre_generate_outputs(
-                                        batch_id, output_generator
-                                    )
-                                )
+                            answer = "Generating your PDF report now..."
+                            download_url = f"/export/pdf/{batch_id}"
+
+                            return {
+                                "answer": answer,
+                                "used_memories": memories,
+                                "download_url": download_url,
+                            }
                         elif format_name == "infographic":
                             answer = "I'm generating your visual infographic. I'll let you know as soon as it's ready."
                             if not state.outputs_ready:

@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Financial Report - {{ batch_id }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 20mm;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: #fff;
+            color: #1a1a2e;
+            font-size: 11pt;
+            line-height: 1.5;
+        }
+        
+        .header {
+            text-align: center;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #FF6600;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 28pt;
+            font-weight: 700;
+            color: #1a1a2e;
+            margin-bottom: 5px;
+        }
+        
+        .header .subtitle {
+            font-size: 11pt;
+            color: #666;
+        }
+        
+        .header .date-range {
+            font-size: 10pt;
+            color: #888;
+            margin-top: 8px;
+        }
+        
+        .metrics-grid {
+            display: flex;
+            justify-content: space-between;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .metric-card {
+            flex: 1;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .metric-card.spending {
+            background: #FEE2E2;
+            border: 2px solid #EF4444;
+        }
+        
+        .metric-card.transactions {
+            background: #E0E7FF;
+            border: 2px solid #6366F1;
+        }
+        
+        .metric-card.categories {
+            background: #D1FAE5;
+            border: 2px solid #10B981;
+        }
+        
+        .metric-card.merchants {
+            background: #FEF3C7;
+            border: 2px solid #F59E0B;
+        }
+        
+        .metric-label {
+            font-size: 9pt;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #555;
+            margin-bottom: 5px;
+        }
+        
+        .metric-value {
+            font-size: 22pt;
+            font-weight: 700;
+            color: #1a1a2e;
+        }
+        
+        .section {
+            margin-bottom: 25px;
+            page-break-inside: avoid;
+        }
+        
+        .section h2 {
+            font-size: 14pt;
+            font-weight: 700;
+            color: #1a1a2e;
+            border-bottom: 2px solid #FF6600;
+            padding-bottom: 8px;
+            margin-bottom: 15px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10pt;
+        }
+        
+        th {
+            background: #1a1a2e;
+            color: #fff;
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e5e5e5;
+        }
+        
+        tr:nth-child(even) {
+            background: #f9f9f9;
+        }
+        
+        .amount {
+            text-align: right;
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+        }
+        
+        .amount.negative {
+            color: #DC2626;
+        }
+        
+        .category-bar {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .category-name {
+            width: 120px;
+            font-size: 10pt;
+        }
+        
+        .category-bar-fill {
+            height: 18px;
+            background: #FF6600;
+            border-radius: 3px;
+            margin-right: 10px;
+        }
+        
+        .category-amount {
+            font-size: 10pt;
+            font-weight: 600;
+            min-width: 80px;
+            text-align: right;
+        }
+        
+        .insights-list {
+            list-style: none;
+        }
+        
+        .insights-list li {
+            padding: 10px 15px;
+            background: #FFF7ED;
+            border-left: 4px solid #FF6600;
+            margin-bottom: 10px;
+            font-size: 10pt;
+        }
+        
+        .top-merchants-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        
+        .merchant-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+        
+        .footer {
+            margin-top: 40px;
+            padding-top: 15px;
+            border-top: 1px solid #ddd;
+            text-align: center;
+            font-size: 9pt;
+            color: #888;
+        }
+        
+        .page-break {
+            page-break-before: always;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Financial Report</h1>
+        <div class="subtitle">SOA1 Phinance Analysis</div>
+        <div class="date-range">
+            {% if date_range %}
+            {{ date_range.start }} to {{ date_range.end }}
+            {% else %}
+            Generated: {{ generated_at }}
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="metrics-grid">
+        <div class="metric-card spending">
+            <div class="metric-label">Total Spending</div>
+            <div class="metric-value">${{ "{:,.2f}".format(total_spent) }}</div>
+        </div>
+        <div class="metric-card transactions">
+            <div class="metric-label">Transactions</div>
+            <div class="metric-value">{{ transaction_count }}</div>
+        </div>
+        <div class="metric-card categories">
+            <div class="metric-label">Categories</div>
+            <div class="metric-value">{{ categories|length }}</div>
+        </div>
+        <div class="metric-card merchants">
+            <div class="metric-label">Merchants</div>
+            <div class="metric-value">{{ top_merchants|length if top_merchants else 0 }}</div>
+        </div>
+    </div>
+    
+    <div class="section">
+        <h2>Spending by Category</h2>
+        {% for category, amount in categories.items() %}
+        <div class="category-bar">
+            <div class="category-name">{{ category|title }}</div>
+            <div class="category-bar-fill" style="width: {{ (amount / total_spent * 100)|round|int if total_spent > 0 else 0 }}%;"></div>
+            <div class="category-amount">${{ "{:,.2f}".format(amount) }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    
+    {% if top_merchants %}
+    <div class="section">
+        <h2>Top Merchants</h2>
+        <div class="top-merchants-grid">
+            {% for merchant in top_merchants[:10] %}
+            <div class="merchant-item">
+                <span>{{ merchant.merchant[:30] }}</span>
+                <span class="amount">${{ "{:,.2f}".format(merchant.total) }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    
+    {% if insights %}
+    <div class="section">
+        <h2>Key Insights</h2>
+        <ul class="insights-list">
+            {% for insight in insights[:5] %}
+            <li>{{ insight }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    
+    {% if transactions %}
+    <div class="section page-break">
+        <h2>Transaction Details (Last 50)</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Merchant</th>
+                    <th>Category</th>
+                    <th style="text-align: right;">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tx in transactions[:50] %}
+                <tr>
+                    <td>{{ tx.date }}</td>
+                    <td>{{ tx.merchant[:35] if tx.merchant else tx.raw_merchant[:35] }}</td>
+                    <td>{{ tx.category|title }}</td>
+                    <td class="amount negative">${{ "{:,.2f}".format(tx.amount) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if transactions|length > 50 %}
+        <p style="margin-top: 10px; font-size: 9pt; color: #888;">
+            Showing 50 of {{ transactions|length }} transactions
+        </p>
+        {% endif %}
+    </div>
+    {% endif %}
+    
+    <div class="footer">
+        <p>Generated by SOA1 Phinance • Batch ID: {{ batch_id }}</p>
+        <p>This report is for personal use only. All data processed locally.</p>
+    </div>
+</body>
+</html>

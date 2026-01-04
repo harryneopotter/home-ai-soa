@@ -154,6 +154,7 @@ class ChatResponse(BaseModel):
     response: str
     used_memories: list = []
     redirect_url: Optional[str] = None
+    download_url: Optional[str] = None
     actions: Optional[List[Dict[str, str]]] = None
 
 
@@ -337,6 +338,7 @@ def create_app() -> FastAPI:
                 response=result["answer"],
                 used_memories=result.get("used_memories", []),
                 redirect_url=result.get("redirect_url"),
+                download_url=result.get("download_url"),
                 actions=result.get("actions"),
             )
 
@@ -400,6 +402,8 @@ def create_app() -> FastAPI:
                     ]
                 if response.get("redirect_url"):
                     done_payload["redirect_url"] = response["redirect_url"]
+                if response.get("download_url"):
+                    done_payload["download_url"] = response["download_url"]
                 yield f"data: {json.dumps(done_payload)}\n\n"
 
                 if CHAT_STORAGE_AVAILABLE:
