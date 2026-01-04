@@ -42,6 +42,17 @@ _Last updated: January 4, 2026 (Session 32 - Merchant Stable IDs)_
 
 ---
 
+## 📅 Scheduled Tasks (Jan 6, 2026)
+
+### 4. Confidence Score Integration
+- [ ] **Merchant Confidence in LLM Prompts**: Pass `merchant_confidence` stats to `build_insights_prompt()` so LLM can flag uncertain categorizations
+- [ ] **AI Insight Confidence Scores**: Investigate adding confidence scores to LLM-generated insights/recommendations
+  - Should insights have confidence? (e.g., "High confidence: You spend most on Amazon" vs "Low confidence: Subscription pattern detected")
+  - How to compute? LLM self-assessment? Heuristics based on data quality?
+  - Where to display? PDF reports? Dashboard? Chat responses?
+
+---
+
 ## 🏁 Recently Completed (Jan 4, 2026 - Session 32)
 - **Session 32**: Merchant Stable IDs & Normalization Fix
   - Fixed merchant normalization order - now normalizes BEFORE saving to DB
