@@ -1344,6 +1344,119 @@
             }
         }
 
+        function initializeChart() {
+            const canvas = document.getElementById('expenseChart');
+            if (!canvas) return;
+            
+            // Destroy existing chart if any
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+            
+            // Get category data
+            let labels = [];
+            let data = [];
+            let backgroundColor = [
+                '#EF4444', '#F59E0B', '#10B981', '#3B82F6', 
+                '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16',
+                '#F97316', '#6366F1', '#14B8A6', '#A855F7'
+            ];
+            
+            if (analysisData && analysisData.categories) {
+                const cats = Object.entries(analysisData.categories).sort((a, b) => b[1] - a[1]);
+                labels = cats.map(c => c[0]);
+                data = cats.map(c => c[1]);
+            } else {
+                // Mock data fallback
+                labels = ['Dining', 'Groceries', 'Transportation', 'Entertainment', 'Utilities', 'Shopping', 'Healthcare', 'Subscriptions'];
+                data = [8432, 6720, 5240, 4350, 3890, 3250, 2890, 1250];
+            }
+            
+            const ctx = canvas.getContext('2d');
+            chartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: backgroundColor.slice(0, labels.length),
+                        borderColor: '#0F1419',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                color: '#B0B8C1',
+                                font: {
+                                    family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
+                                    size: 12
+                                },
+                                padding: 15,
+                                usePointStyle: true,
+                                pointStyle: 'circle'
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(15, 20, 25, 0.95)',
+                            titleColor: '#F0F9FF',
+                            bodyColor: '#B0B8C1',
+                            borderColor: 'rgba(96, 165, 250, 0.3)',
+                            borderWidth: 1,
+                            padding: 12,
+                            callbacks: {
+                                label: function(context) {
+                                    const value = context.raw;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = ((value / total) * 100).toFixed(1);
+                                    return `$${value.toLocaleString()} (${percentage}%)`;
+                                }
+                            }
+                        }
+                    },
+                    cutout: '60%'
+                }
+            });
+        }
+
+        function generateMockTransactions() {
+            // Generate mock data for demo purposes
+            const categories = ['Dining', 'Groceries', 'Transportation', 'Entertainment', 'Utilities', 'Shopping', 'Healthcare', 'Subscriptions'];
+            const merchants = {
+                'Dining': ['Starbucks', 'Chipotle', 'McDonalds', 'Olive Garden', 'Panera Bread'],
+                'Groceries': ['Walmart', 'Costco', 'Trader Joes', 'Whole Foods', 'Kroger'],
+                'Transportation': ['Shell Gas', 'Uber', 'Lyft', 'BP Gas', 'Chevron'],
+                'Entertainment': ['Netflix', 'Spotify', 'AMC Theaters', 'Steam', 'Xbox'],
+                'Utilities': ['Electric Co', 'Water Dept', 'Gas Company', 'Internet Provider', 'Phone Bill'],
+                'Shopping': ['Amazon', 'Target', 'Best Buy', 'Nike', 'Apple Store'],
+                'Healthcare': ['CVS Pharmacy', 'Walgreens', 'Dr Office', 'Dentist', 'Eye Doctor'],
+                'Subscriptions': ['Netflix', 'Spotify', 'Adobe', 'Microsoft 365', 'Gym Membership']
+            };
+            
+            allTransactions = [];
+            for (let i = 0; i < 500; i++) {
+                const cat = categories[Math.floor(Math.random() * categories.length)];
+                const merchList = merchants[cat];
+                const merchant = merchList[Math.floor(Math.random() * merchList.length)];
+                const date = new Date(2024, Math.floor(Math.random() * 12), Math.floor(Math.random() * 28) + 1);
+                allTransactions.push({
+                    id: `txn${i}`,
+                    date: date.toISOString().split('T')[0],
+                    merchant: merchant,
+                    category: cat,
+                    amount: (Math.random() * 200 + 5).toFixed(2),
+                    confidence: (0.85 + Math.random() * 0.15).toFixed(2)
+                });
+            }
+            allTransactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+            filteredTransactions = [...allTransactions];
+            renderTransactions();
+        }
+
         initializeData();
         document.getElementById('searchInput').addEventListener('input', applyFilters);
         document.getElementById('categorySelect').addEventListener('change', applyFilters);

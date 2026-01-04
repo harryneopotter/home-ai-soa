@@ -552,6 +552,20 @@ class BatchProcessor:
             )
             print(f"Output pre-generation failed for {batch_id}: {e}")
 
+    def pre_generate_outputs_sync(self, batch_id: str, generator: Any):
+        """Synchronous wrapper for pre_generate_outputs - for use in threads."""
+        import asyncio
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self.pre_generate_outputs(batch_id, generator))
+            finally:
+                loop.close()
+        except Exception as e:
+            print(f"Sync output pre-generation failed for {batch_id}: {e}")
+
     def _build_phinance_prompt(self, preliminary: Dict[str, Any]) -> str:
         return f"Analyze these transactions: {preliminary.get('transactions', [])}"
 

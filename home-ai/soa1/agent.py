@@ -5,6 +5,7 @@ import os, pathlib
 import re
 import json
 import time
+import threading
 
 from memory import MemoryClient
 from model import ModelClient
@@ -173,6 +174,42 @@ class SOA1Agent:
 
         lines.append("[/DOCUMENT CONTEXT]")
         return "\n".join(lines)
+
+    def _spawn_phinance_background(
+        self, batch_id: str, document_context: Dict[str, Any]
+    ) -> None:
+        """Spawn background thread for phinance analysis. Self-contained - no API cooperation needed."""
+
+        def _run_analysis():
+            try:
+                logger.info(
+                    f"[background] Starting phinance analysis for batch {batch_id}"
+                )
+                self._invoke_phinance(document_context)
+
+                state = batch_processor.get_batch_state(batch_id)
+                if state:
+                    state.status = "complete"
+                    logger.info(f"[background] Phinance complete for batch {batch_id}")
+
+                    try:
+                        batch_processor.pre_generate_outputs_sync(
+                            batch_id, output_generator
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"[background] Output pre-generation failed: {e}"
+                        )
+
+            except Exception as e:
+                logger.error(f"[background] Phinance failed for {batch_id}: {e}")
+                state = batch_processor.get_batch_state(batch_id)
+                if state:
+                    state.status = "failed"
+
+        thread = threading.Thread(target=_run_analysis, daemon=True)
+        thread.start()
+        logger.info(f"Spawned background phinance thread for batch {batch_id}")
 
     def _invoke_phinance(self, document_context: Optional[Dict[str, Any]]) -> str:
         if not document_context or not document_context.get("documents"):
@@ -586,10 +623,12 @@ class SOA1Agent:
 
                     state.status = "analyzing"
 
+                    self._spawn_phinance_background(batch_id, document_context)
+
                     return {
                         "answer": answer,
                         "used_memories": memories,
-                        "trigger_phinance_background": batch_id,
+                        "poll_for_completion": batch_id,
                     }
 
             phinance_result = self._invoke_phinance(document_context)
@@ -670,10 +709,25 @@ class SOA1Agent:
             "used_memories": memories,
         }
 
-        # Signal for Phase 3: output pre-generation if phinance completed
+        # Add action buttons when batch exists (uploading, processing, or ready)
         if document_context and document_context.get("batch_id"):
             batch_id = document_context["batch_id"]
             state = batch_processor.get_batch_state(batch_id)
+
+            # Show action buttons for any active batch state (not complete/analyzing)
+            if state and state.status in ("uploading", "processing", "ready"):
+                result["actions"] = [
+                    {
+                        "label": "Run Detailed Analysis",
+                        "value": "yes, run detailed analysis",
+                    },
+                    {
+                        "label": "Ask Something Else",
+                        "value": "I have a different question",
+                    },
+                ]
+
+            # Signal for Phase 3: output pre-generation if phinance completed
             if state and state.phinance_analysis and not state.outputs_ready:
                 result["trigger_output_generation"] = batch_id
 

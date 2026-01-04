@@ -119,40 +119,6 @@ def _add_pending_document(session_id: str, doc_metadata: Dict[str, Any]) -> None
     _pending_documents[session_id].append(doc_metadata)
 
 
-async def _run_phinance_background(
-    batch_id: str, agent: "SOA1Agent", document_context: Dict[str, Any]
-):
-    try:
-        state = batch_processor.get_batch_state(batch_id)
-        if not state:
-            logger.error(f"Batch {batch_id} not found for background phinance")
-            return
-
-        emit_pipeline_event("phinance_background_start", batch_id)
-
-        def _sync_phinance():
-            return agent._invoke_phinance(document_context)
-
-        await asyncio.to_thread(_sync_phinance)
-
-        state.status = "complete"
-        emit_pipeline_event("phinance_background_complete", batch_id)
-        logger.info(f"Background phinance complete for batch {batch_id}")
-
-        asyncio.create_task(
-            batch_processor.pre_generate_outputs(batch_id, output_generator)
-        )
-
-    except Exception as e:
-        logger.error(f"Background phinance failed for {batch_id}: {e}")
-        emit_pipeline_event(
-            "error", batch_id, {"stage": "phinance_background", "error": str(e)}
-        )
-        state = batch_processor.get_batch_state(batch_id)
-        if state:
-            state.status = "failed"
-
-
 # Request/Response Models
 class AskRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
@@ -188,6 +154,7 @@ class ChatResponse(BaseModel):
     response: str
     used_memories: list = []
     redirect_url: Optional[str] = None
+    actions: Optional[List[Dict[str, str]]] = None
 
 
 class PDFUploadRequest(BaseModel):
@@ -354,15 +321,6 @@ def create_app() -> FastAPI:
             )
             logger.info(f"[{client_ip}] Chat response generated successfully")
 
-            if result.get("trigger_phinance_background"):
-                batch_id = result["trigger_phinance_background"]
-                asyncio.create_task(
-                    _run_phinance_background(batch_id, agent, document_context)
-                )
-                logger.info(
-                    f"Started background phinance analysis for batch {batch_id}"
-                )
-
             if result.get("trigger_output_generation"):
                 batch_id = result["trigger_output_generation"]
                 asyncio.create_task(
@@ -379,6 +337,7 @@ def create_app() -> FastAPI:
                 response=result["answer"],
                 used_memories=result.get("used_memories", []),
                 redirect_url=result.get("redirect_url"),
+                actions=result.get("actions"),
             )
 
         except Exception as e:
@@ -423,8 +382,25 @@ def create_app() -> FastAPI:
                 )
                 complete_response = response.get("answer", "")
 
+                if response.get("trigger_output_generation"):
+                    batch_id = response["trigger_output_generation"]
+                    asyncio.create_task(
+                        batch_processor.pre_generate_outputs(batch_id, output_generator)
+                    )
+                    logger.info(
+                        f"[stream] Triggered output pre-generation for batch {batch_id}"
+                    )
+
                 yield f"data: {json.dumps({'chunk': complete_response})}\n\n"
-                yield f"data: {json.dumps({'done': True})}\n\n"
+
+                done_payload = {"done": True}
+                if response.get("poll_for_completion"):
+                    done_payload["poll_for_completion"] = response[
+                        "poll_for_completion"
+                    ]
+                if response.get("redirect_url"):
+                    done_payload["redirect_url"] = response["redirect_url"]
+                yield f"data: {json.dumps(done_payload)}\n\n"
 
                 if CHAT_STORAGE_AVAILABLE:
                     chat_storage.save_chat_message(
@@ -690,6 +666,7 @@ def create_app() -> FastAPI:
             "batch_id": batch_id,
             "file_count": len(processed_files),
             "agent_response": agent_result.get("answer", ""),
+            "actions": agent_result.get("actions"),
         }
 
     async def _background_full_parse(doc_id: str, dest_path: str, filename: str):

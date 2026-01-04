@@ -15,7 +15,7 @@
                     colors: {
                         'bg-brutal-dark': '#000000',
                         'text-brutal-light': '#FFFFFF',
-                        'text-brutal-gray': '#AAAAAA',
+                        'text-brutal-gray': '#C0C0C0',
                         'accent-neon-orange': '#FF6600',
                         'accent-green': '#00FF66',
                         'accent-red': '#FF3333',
@@ -44,7 +44,7 @@
             line-height: 1.75rem;
         }
         .brutal-subtext {
-            color: #AAAAAA;
+            color: #C0C0C0;
             font-family: 'Space Mono', monospace;
             font-size: 0.75rem;
             line-height: 1rem;
@@ -58,7 +58,7 @@
             font-family: 'Space Mono', monospace;
         }
         .brutal-input::placeholder {
-            color: #888;
+            color: #999;
         }
         .brutal-input:focus {
             border-color: #FF6600;
@@ -79,8 +79,8 @@
             color: #000;
         }
         .brutal-btn:disabled {
-            border-color: #444;
-            color: #555;
+            border-color: #555;
+            color: #666;
             cursor: not-allowed;
             background: transparent;
         }
@@ -152,22 +152,22 @@
             <div class="flex items-center space-x-6 text-[9px] uppercase tracking-wider">
                 <div class="flex items-center space-x-2">
                     <span id="webuiStatus" class="w-2 h-2 rounded-full bg-accent-neon-orange animate-pulse"></span>
-                    <span class="text-gray-300">WebUI</span>
+                    <span class="text-gray-200">WebUI</span>
                 </div>
                 <div class="flex items-center space-x-2">
                     <span id="apiStatus" class="w-2 h-2 rounded-full bg-accent-neon-orange animate-pulse"></span>
-                    <span class="text-gray-300">SOA1 API</span>
+                    <span class="text-gray-200">SOA1 API</span>
                 </div>
                 <div class="flex items-center space-x-2">
                     <span id="ollamaStatus" class="w-2 h-2 rounded-full bg-accent-neon-orange animate-pulse"></span>
-                    <span class="text-gray-300">Ollama</span>
+                    <span class="text-gray-200">Ollama</span>
                 </div>
                 <div class="flex items-center space-x-2">
                     <span id="modelsStatus" class="w-2 h-2 rounded-full bg-accent-neon-orange animate-pulse"></span>
-                    <span class="text-gray-300">Models</span>
+                    <span class="text-gray-200">Models</span>
                 </div>
             </div>
-            <div id="statusMessage" class="text-[9px] text-gray-400 uppercase tracking-wider"></div>
+            <div id="statusMessage" class="text-[9px] text-gray-300 uppercase tracking-wider"></div>
         </div>
     </div>
 
@@ -184,7 +184,7 @@
                 </div>
             </div>
             {% if tailscale_ip %}
-            <div class="brutal-subtext text-[10px] opacity-50 tracking-widest pb-1">
+            <div class="brutal-subtext text-[10px] opacity-70 tracking-widest pb-1">
                 SECURE NODE: {{ tailscale_ip }}
             </div>
             {% endif %}
@@ -202,8 +202,8 @@
                     
                     <div id="uploadArea" class="border border-dashed border-gray-500 p-6 text-center hover:border-accent-neon-orange transition-colors cursor-pointer relative mb-4">
                         <input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept=".pdf" multiple onchange="handleFileSelect(this)">
-                        <span class="material-symbols-outlined text-3xl text-gray-300 mb-2">add_circle</span>
-                        <div class="text-[10px] text-gray-300 uppercase tracking-tighter">DROP PDFs OR CLICK</div>
+                        <span class="material-symbols-outlined text-3xl text-gray-200 mb-2">add_circle</span>
+                        <div class="text-[10px] text-gray-200 uppercase tracking-tighter">DROP PDFs OR CLICK</div>
                         <div id="fileName" class="text-accent-neon-orange mt-2 text-[10px] font-bold truncate hidden"></div>
                     </div>
 
@@ -215,7 +215,7 @@
                 </div>
 
                 <div class="mt-auto pt-10">
-                    <div class="brutal-subtext text-[9px] uppercase opacity-70 leading-relaxed">
+                    <div class="brutal-subtext text-[9px] uppercase opacity-85 leading-relaxed">
                         Notice: This system is strictly local.<br>
                         Data persistence is encrypted.<br>
                         No telemetry is transmitted.
@@ -311,7 +311,7 @@
                 if (response.ok) {
                     const batchId = data.batch_id;
                     const msg = data.agent_response || `Received ${totalFiles} files. Starting batch analysis.`;
-                    appendMessage('agent', msg);
+                    appendMessage('agent', msg, data.actions);
                     
                     // Start polling for status
                     pollBatchStatus(batchId, totalFiles);
@@ -396,6 +396,52 @@
             }, 2000);
         }
 
+        async function pollForAnalysisComplete(batchId) {
+            const statusEl = document.getElementById('uploadStatus');
+            statusEl.textContent = `ANALYZING: ${batchId}...`;
+            statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-neon-orange text-accent-neon-orange';
+            
+            const interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/batch/status?batch_id=${batchId}`);
+                    const data = await response.json();
+                    
+                    if (data.status === 'complete') {
+                        clearInterval(interval);
+                        statusEl.textContent = `ANALYSIS COMPLETE`;
+                        statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-green text-accent-green';
+                        
+                        const summary = data.analysis_summary;
+                        let msg = `**Analysis Complete!**\n\n`;
+                        msg += `📊 **Total Spending**: $${summary.total_spent.toLocaleString()}\n\n`;
+                        msg += `💰 **By Category**:\n`;
+                        for (const [cat, amount] of Object.entries(summary.categories || {})) {
+                            msg += `  • ${cat.charAt(0).toUpperCase() + cat.slice(1)}: $${amount.toLocaleString()}\n`;
+                        }
+                        msg += `\n🏪 **Top Merchants**:\n`;
+                        for (const m of (summary.top_merchants || []).slice(0, 3)) {
+                            msg += `  • ${m.merchant.substring(0, 40)}: $${m.total.toLocaleString()}\n`;
+                        }
+                        msg += `\n**How would you like the detailed report?**`;
+                        
+                        const actions = [
+                            { label: '🖥️ Web Dashboard', value: 'web dashboard' },
+                            { label: '📄 PDF Export', value: 'pdf export' },
+                            { label: '🎨 Infographic', value: 'infographic' }
+                        ];
+                        appendMessage('agent', msg, actions);
+                    } else if (data.status === 'failed') {
+                        clearInterval(interval);
+                        statusEl.textContent = `ANALYSIS FAILED`;
+                        statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
+                        appendMessage('agent', 'Analysis failed. Please try again.');
+                    }
+                } catch (e) {
+                    console.error('Poll error:', e);
+                }
+            }, 2000);
+        }
+
         function handleEnter(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -413,7 +459,7 @@
             const div = document.createElement('div');
             div.className = `chat-msg ${role}`;
             const label = document.createElement('div');
-            label.className = 'text-[8px] uppercase tracking-widest mb-1 opacity-70 font-bold';
+            label.className = 'text-[8px] uppercase tracking-widest mb-1 opacity-85 font-bold';
             label.textContent = role === 'user' ? 'Local User' : 'SOA1 Core';
             div.appendChild(label);
             const content = document.createElement('div');
@@ -482,7 +528,12 @@
                                     appendToStream(contentEl, data.chunk);
                                 }
                                 if (data.done) {
-                                    // Optionally handle stream completion
+                                    if (data.poll_for_completion) {
+                                        pollForAnalysisComplete(data.poll_for_completion);
+                                    }
+                                    if (data.redirect_url) {
+                                        setTimeout(() => window.open(data.redirect_url, '_blank'), 500);
+                                    }
                                 }
                                 if (data.error) {
                                     if (firstChunk) {
@@ -513,7 +564,12 @@
                             appendToStream(contentEl, data.chunk);
                         }
                         if (data.done) {
-                            // Optionally handle stream completion
+                            if (data.poll_for_completion) {
+                                pollForAnalysisComplete(data.poll_for_completion);
+                            }
+                            if (data.redirect_url) {
+                                setTimeout(() => window.open(data.redirect_url, '_blank'), 500);
+                            }
                         }
                         if (data.error) {
                             if (firstChunk) {
@@ -558,7 +614,7 @@
             }
         }
 
-        function appendMessage(role, text) {
+        function appendMessage(role, text, actions = null) {
             const history = document.getElementById('chatHistory');
             
             // Clear placeholder on first message
@@ -570,7 +626,7 @@
             div.className = `chat-msg ${role}`;
             
             const label = document.createElement('div');
-            label.className = 'text-[8px] uppercase tracking-widest mb-1 opacity-70 font-bold';
+            label.className = 'text-[8px] uppercase tracking-widest mb-1 opacity-85 font-bold';
             label.textContent = role === 'user' ? 'Local User' : 'SOA1 Core';
             div.appendChild(label);
 
@@ -595,6 +651,24 @@
             }
             
             div.appendChild(content);
+
+            // Render action buttons if provided
+            if (actions && Array.isArray(actions) && actions.length > 0) {
+                const btnContainer = document.createElement('div');
+                btnContainer.className = 'flex flex-wrap gap-2 mt-3';
+                actions.forEach(action => {
+                    const btn = document.createElement('button');
+                    btn.className = 'brutal-btn text-xs py-1 px-3';
+                    btn.textContent = action.label;
+                    btn.onclick = () => {
+                        document.getElementById('messageInput').value = action.value;
+                        sendMessage();
+                    };
+                    btnContainer.appendChild(btn);
+                });
+                div.appendChild(btnContainer);
+            }
+
             history.appendChild(div);
             history.scrollTop = history.scrollHeight;
         }
