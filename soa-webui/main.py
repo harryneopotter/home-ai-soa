@@ -427,6 +427,18 @@ def export_pdf(request: Request, batch_id: str):
         ]
     ]
 
+    insights = []
+    top_cat = list(categories.items())[0] if categories else None
+    if top_cat and total_spent > 0:
+        pct = top_cat[1] / total_spent * 100
+        insights.append(
+            f"Top category: {top_cat[0].title()} at ${top_cat[1]:,.2f} ({pct:.0f}% of spending)"
+        )
+    if top_merchants:
+        insights.append(
+            f"Top merchant: {top_merchants[0]['merchant']} at ${top_merchants[0]['total']:,.2f}"
+        )
+
     date_range = {}
     if transactions:
         dates = [t.get("date") for t in transactions if t.get("date")]
@@ -441,7 +453,86 @@ def export_pdf(request: Request, batch_id: str):
         "categories": categories,
         "top_merchants": top_merchants,
         "transactions": transactions,
-        "insights": [],
+        "insights": insights,
+        "date_range": date_range,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+    html_content = templates.get_template("pdf_report.html").render(**template_data)
+
+    pdf_buffer = BytesIO()
+    HTML(string=html_content, base_url=str(Path(__file__).parent)).write_pdf(pdf_buffer)
+    pdf_buffer.seek(0)
+
+    filename = f"phinance_report_{batch_id}_{datetime.now().strftime('%Y%m%d')}.pdf"
+
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+    if not db_path.exists():
+        db_path = Path(__file__).parent.parent / "data" / "finance.db"
+
+    if not db_path.exists():
+        raise HTTPException(status_code=404, detail="Database not found")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    cur.execute(
+        "SELECT * FROM transactions WHERE doc_id LIKE ? ORDER BY date DESC",
+        (f"%{batch_id}%",),
+    )
+    rows = cur.fetchall()
+    transactions = [dict(r) for r in rows]
+
+    if not transactions:
+        cur.execute("SELECT * FROM transactions ORDER BY date DESC LIMIT 100")
+        rows = cur.fetchall()
+        transactions = [dict(r) for r in rows]
+
+    conn.close()
+
+    transactions = normalize_transactions(transactions)
+    calculated = calculate_financials(transactions)
+
+    insights = []
+    if calculated.get("hidden_drains"):
+        for drain in calculated["hidden_drains"][:3]:
+            insights.append(
+                f"Recurring charge: {drain['merchant']} - ${drain['total']:.2f} ({drain['count']} times)"
+            )
+
+    top_cat = (
+        list(calculated["categories"].items())[0] if calculated["categories"] else None
+    )
+    if top_cat:
+        pct = (
+            (top_cat[1] / calculated["total_spent"] * 100)
+            if calculated["total_spent"] > 0
+            else 0
+        )
+        insights.append(
+            f"Top category: {top_cat[0].title()} at ${top_cat[1]:,.2f} ({pct:.0f}% of spending)"
+        )
+
+    date_range = {}
+    if transactions:
+        dates = [t.get("date") for t in transactions if t.get("date")]
+        if dates:
+            date_range = {"start": min(dates), "end": max(dates)}
+
+    template_data = {
+        "request": request,
+        "batch_id": batch_id,
+        "total_spent": calculated["total_spent"],
+        "transaction_count": len(transactions),
+        "categories": calculated["categories"],
+        "top_merchants": calculated["top_merchants"],
+        "transactions": transactions,
+        "insights": insights,
         "date_range": date_range,
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }

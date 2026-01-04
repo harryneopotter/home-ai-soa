@@ -409,28 +409,33 @@ def save_transactions_for_doc(
     doc_id: str, transactions: List[Dict[str, Any]], user_id: str = "sachin"
 ) -> int:
     """Save parsed transactions for a document. Returns count of transactions saved."""
-    tx_objs: List[Transaction] = []
-    for tx in transactions:
-        date = tx.get("date") or tx.get("date_raw") or ""
-        description = tx.get("description") or tx.get("raw_line") or ""
-        amount = tx.get("amount") or 0.0
-        category = tx.get("category")
-        merchant = tx.get("merchant") or tx.get("merchant_clean") or "Unknown"
-        tx_objs.append(
-            Transaction(
-                id=None,
-                date=date,
-                description=description,
-                amount=float(amount),
-                category=category,
-                merchant=merchant,
-                user_id=user_id,
-                doc_id=doc_id,
-            )
-        )
+    with get_db() as conn:
+        for tx in transactions:
+            date = tx.get("date") or tx.get("date_raw") or ""
+            description = tx.get("description") or tx.get("raw_line") or ""
+            amount = tx.get("amount") or 0.0
+            category = tx.get("category")
+            merchant = tx.get("merchant") or tx.get("merchant_clean") or "Unknown"
+            raw_merchant = tx.get("merchant_raw") or tx.get("raw_merchant") or merchant
 
-    insert_transactions(user_id, tx_objs, doc_id=doc_id)
-    return len(tx_objs)
+            conn.execute(
+                """
+                INSERT INTO transactions (user_id, doc_id, date, description, amount, category, merchant, raw_merchant)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    doc_id,
+                    date,
+                    description,
+                    float(amount),
+                    category,
+                    merchant,
+                    raw_merchant,
+                ),
+            )
+        conn.commit()
+    return len(transactions)
 
 
 # Alias for backward compatibility with main.py

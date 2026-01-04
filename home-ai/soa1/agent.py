@@ -261,6 +261,8 @@ class SOA1Agent:
         if not all_transactions:
             return "No transactions were extracted from your documents. They may not contain recognizable transaction data."
 
+        all_transactions = normalize_transactions(all_transactions)
+
         if not state.transactions_persisted and doc_ids:
             try:
                 from home_ai.finance_agent.src import storage as fa_storage
@@ -276,8 +278,6 @@ class SOA1Agent:
                 state.consent_given_at = time.time()
             except Exception as e:
                 logger.warning(f"Failed to persist transactions: {e}")
-
-        all_transactions = normalize_transactions(all_transactions)
 
         if state.calculated_summary:
             calculated = state.calculated_summary
@@ -595,38 +595,15 @@ class SOA1Agent:
             logger.info("Detected [INVOKE:phinance] signal - routing to phinance")
             answer_without_tag = INVOKE_PATTERN.sub("", answer).strip()
 
-            # If the response looks like a hallucinated report (contains multiple $ signs or numbers)
-            # and the tag was missing (triggered by backup catch), or it's just too long,
-            # sanitize it to keep only the engagement part.
-            if ("$" in answer_without_tag and answer_without_tag.count("$") > 2) or len(
-                answer_without_tag
-            ) > 300:
-                logger.warning(
-                    "Discarding potential hallucinated LLM report in engagement message"
-                )
-                answer_without_tag = "Starting your analysis now! I'll have the results for you in a few seconds."
-
             batch_id = document_context.get("batch_id") if document_context else None
             if batch_id:
                 state = batch_processor.get_batch_state(batch_id)
                 if state and state.status == "ready":
-                    findings_text = ""
-                    if state.interesting_findings:
-                        findings_text = "\n\n**While I analyze the details, here's what I noticed:**\n"
-                        for finding in state.interesting_findings:
-                            findings_text += f"• {finding}\n"
-
-                    if answer_without_tag:
-                        answer = f"{answer_without_tag}{findings_text}\n\nI'm running the deep analysis now - I'll have the full report ready in a few seconds."
-                    else:
-                        answer = f"Starting your analysis now!{findings_text}\n\nI'll have the full report ready in a few seconds."
-
                     state.status = "analyzing"
-
                     self._spawn_phinance_background(batch_id, document_context)
 
                     return {
-                        "answer": answer,
+                        "answer": answer_without_tag if answer_without_tag else answer,
                         "used_memories": memories,
                         "poll_for_completion": batch_id,
                     }
