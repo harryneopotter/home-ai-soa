@@ -87,6 +87,7 @@ def init_db() -> sqlite3.Connection:
             category TEXT,
             merchant TEXT NOT NULL,
             raw_merchant TEXT,
+            merchant_stable_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         )
@@ -165,6 +166,11 @@ def init_db() -> sqlite3.Connection:
 
     try:
         conn.execute("ALTER TABLE batches ADD COLUMN phinance_analysis TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE transactions ADD COLUMN merchant_stable_id TEXT")
     except sqlite3.OperationalError:
         pass
 
@@ -417,11 +423,12 @@ def save_transactions_for_doc(
             category = tx.get("category")
             merchant = tx.get("merchant") or tx.get("merchant_clean") or "Unknown"
             raw_merchant = tx.get("merchant_raw") or tx.get("raw_merchant") or merchant
+            merchant_stable_id = tx.get("merchant_stable_id")
 
             conn.execute(
                 """
-                INSERT INTO transactions (user_id, doc_id, date, description, amount, category, merchant, raw_merchant)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO transactions (user_id, doc_id, date, description, amount, category, merchant, raw_merchant, merchant_stable_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id,
@@ -432,6 +439,7 @@ def save_transactions_for_doc(
                     category,
                     merchant,
                     raw_merchant,
+                    merchant_stable_id,
                 ),
             )
         conn.commit()

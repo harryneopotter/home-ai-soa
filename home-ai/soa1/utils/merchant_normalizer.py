@@ -1,5 +1,9 @@
+import hashlib
 import re
 from typing import Dict, Optional, Tuple, List
+
+# Version the dictionary so we can track which version was used for each batch
+MERCHANT_DICT_VERSION = "1.0.0"
 
 MERCHANT_PATTERNS: List[Tuple[str, str, str]] = [
     (
@@ -54,36 +58,48 @@ _compiled_patterns: List[Tuple[re.Pattern, str, str]] = [
 ]
 
 
-def normalize_merchant(raw_name: str) -> Tuple[str, Optional[str], float]:
+def compute_merchant_stable_id(raw_name: str) -> str:
+    """Stable hash for merchant linkage - survives dictionary updates."""
+    canonical = re.sub(r"[^a-z0-9]", "", raw_name.lower())
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+def normalize_merchant(raw_name: str) -> Tuple[str, Optional[str], float, str]:
+    """Returns (normalized_name, category, confidence, stable_id)."""
     if not raw_name:
-        return ("Unknown", None, 0.0)
+        return ("Unknown", None, 0.0, compute_merchant_stable_id("unknown"))
 
     raw_name = raw_name.strip()
+    stable_id = compute_merchant_stable_id(raw_name)
 
     for pattern, normalized, category in _compiled_patterns:
         match = pattern.match(raw_name)
         if match:
             if "\\1" in normalized and match.groups():
                 normalized = match.group(1).strip().title()
-            return (normalized, category, 0.95)
+            return (normalized, category, 0.95, stable_id)
 
     cleaned = re.sub(r"\s*#?\d+\s*$", "", raw_name)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
     if cleaned != raw_name:
-        return (cleaned.title(), None, 0.5)
+        return (cleaned.title(), None, 0.5, stable_id)
 
-    return (raw_name.title(), None, 0.3)
+    return (raw_name.title(), None, 0.3, stable_id)
 
 
 def normalize_transactions(transactions: List[Dict]) -> List[Dict]:
     for tx in transactions:
         raw_merchant = tx.get("merchant", "")
-        normalized, suggested_cat, confidence = normalize_merchant(raw_merchant)
+        normalized, suggested_cat, confidence, stable_id = normalize_merchant(
+            raw_merchant
+        )
 
         tx["merchant_raw"] = raw_merchant
         tx["merchant"] = normalized
         tx["merchant_confidence"] = confidence
+        tx["merchant_stable_id"] = stable_id
+        tx["merchant_dict_version"] = MERCHANT_DICT_VERSION
 
         if suggested_cat and not tx.get("category"):
             tx["category"] = suggested_cat
