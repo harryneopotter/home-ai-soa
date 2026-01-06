@@ -394,12 +394,32 @@ def export_pdf(request: Request, batch_id: str):
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
-    cur.execute(
-        "SELECT * FROM transactions WHERE doc_id LIKE ? ORDER BY date DESC",
-        (f"%{batch_id}%",),
-    )
-    rows = cur.fetchall()
-    transactions = [dict(r) for r in rows]
+    # Look up doc_ids for this batch
+    cur.execute("SELECT doc_ids FROM batches WHERE batch_id = ?", (batch_id,))
+    batch_row = cur.fetchone()
+
+    transactions = []
+    if batch_row and batch_row["doc_ids"]:
+        import json as json_module
+
+        doc_ids = json_module.loads(batch_row["doc_ids"])
+        if doc_ids:
+            placeholders = ",".join("?" * len(doc_ids))
+            cur.execute(
+                f"SELECT * FROM transactions WHERE doc_id IN ({placeholders}) ORDER BY date DESC",
+                doc_ids,
+            )
+            rows = cur.fetchall()
+            transactions = [dict(r) for r in rows]
+
+    if not transactions:
+        # Fallback: try legacy query or get recent transactions
+        cur.execute(
+            "SELECT * FROM transactions WHERE doc_id LIKE ? ORDER BY date DESC",
+            (f"%{batch_id}%",),
+        )
+        rows = cur.fetchall()
+        transactions = [dict(r) for r in rows]
 
     if not transactions:
         cur.execute("SELECT * FROM transactions ORDER BY date DESC LIMIT 100")
@@ -439,11 +459,23 @@ def export_pdf(request: Request, batch_id: str):
             f"Top merchant: {top_merchants[0]['merchant']} at ${top_merchants[0]['total']:,.2f}"
         )
 
+    def _parse_date_str(d):
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"):
+            try:
+                return datetime.strptime(d, fmt)
+            except ValueError:
+                continue
+        return None
+
     date_range = {}
     if transactions:
         dates = [t.get("date") for t in transactions if t.get("date")]
         if dates:
-            date_range = {"start": min(dates), "end": max(dates)}
+            parsed = [(d, _parse_date_str(d)) for d in dates]
+            valid = [(d, p) for d, p in parsed if p]
+            if valid:
+                valid.sort(key=lambda x: x[1])
+                date_range = {"start": valid[0][0], "end": valid[-1][0]}
 
     template_data = {
         "request": request,
@@ -518,11 +550,23 @@ def export_pdf(request: Request, batch_id: str):
             f"Top category: {top_cat[0].title()} at ${top_cat[1]:,.2f} ({pct:.0f}% of spending)"
         )
 
+    def _parse_date_str(d):
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"):
+            try:
+                return datetime.strptime(d, fmt)
+            except ValueError:
+                continue
+        return None
+
     date_range = {}
     if transactions:
         dates = [t.get("date") for t in transactions if t.get("date")]
         if dates:
-            date_range = {"start": min(dates), "end": max(dates)}
+            parsed = [(d, _parse_date_str(d)) for d in dates]
+            valid = [(d, p) for d, p in parsed if p]
+            if valid:
+                valid.sort(key=lambda x: x[1])
+                date_range = {"start": valid[0][0], "end": valid[-1][0]}
 
     template_data = {
         "request": request,
@@ -1470,11 +1514,15 @@ async def analysis_status(doc_id: str):
 async def api_chat(request: Request):
     """Proxy chat requests to SOA1 API."""
     try:
+        # Enforce IP Whitelist
+        client_ip = request.client.host
+        if not check_access(client_ip):
+            raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
+
         body = await request.json()
         soa1_url = config.services.get("api", "http://localhost:8001")
 
         # Forward original IP and session ID
-        client_ip = request.headers.get("X-Forwarded-For") or request.client.host
         headers = {
             "X-Session-ID": request.headers.get("X-Session-ID") or client_ip,
             "X-Forwarded-For": client_ip,
@@ -1496,11 +1544,15 @@ async def api_chat(request: Request):
 async def api_chat_stream(request: Request):
     """Proxy streaming chat requests to SOA1 API (SSE)."""
     try:
+        # Enforce IP Whitelist
+        client_ip = request.client.host
+        if not check_access(client_ip):
+            raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
+
         body = await request.json()
         soa1_url = config.services.get("api", "http://localhost:8001")
 
         # Forward original IP and session ID
-        client_ip = request.headers.get("X-Forwarded-For") or request.client.host
         headers = {
             "X-Session-ID": request.headers.get("X-Session-ID") or client_ip,
             "X-Forwarded-For": client_ip,
@@ -1539,20 +1591,51 @@ async def api_chat_stream(request: Request):
         )
 
 
+PDF_MAGIC_BYTES = b"%PDF-"
+ALLOWED_PDF_EXTENSIONS = {".pdf"}
+MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024
+
+
+def _validate_pdf_content(content: bytes, filename: str) -> str | None:
+    """Returns error message if invalid, None if valid."""
+    if not filename:
+        return "No filename provided"
+
+    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in ALLOWED_PDF_EXTENSIONS:
+        return f"Invalid file type '{ext}'. Only PDF files accepted."
+
+    if len(content) == 0:
+        return "File is empty (0 bytes)"
+
+    if len(content) > MAX_PDF_SIZE_BYTES:
+        return f"File too large ({len(content) / 1024 / 1024:.1f}MB). Maximum is 10MB."
+
+    if not content.startswith(PDF_MAGIC_BYTES):
+        header_preview = content[:20].decode("utf-8", errors="replace")
+        return f"Invalid PDF header. Got: '{header_preview}...'"
+
+    return None
+
+
 @app.post("/api/proxy/upload")
 async def api_proxy_upload(request: Request, file: UploadFile = File(...)):
-    """Proxy file upload to SOA1 API."""
     try:
         soa1_url = config.services.get("api", "http://localhost:8001")
 
-        # Read file content
         content = await file.read()
 
-        # Prepare files dict for requests
-        files = {"file": (file.filename, content, file.content_type)}
+        validation_error = _validate_pdf_content(content, file.filename)
+        if validation_error:
+            return {"status": "error", "message": validation_error}
+
+        files = {"file": (file.filename, content, "application/pdf")}
 
         # Forward session ID or original IP
-        client_ip = request.headers.get("X-Forwarded-For") or request.client.host
+        client_ip = request.client.host
+        if not check_access(client_ip):
+            raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
+
         headers = {
             "X-Session-ID": request.headers.get("X-Session-ID") or client_ip,
             "X-Forwarded-For": client_ip,
@@ -1572,22 +1655,35 @@ async def api_proxy_upload(request: Request, file: UploadFile = File(...)):
 
 @app.post("/api/proxy/upload-batch")
 async def api_proxy_upload_batch(request: Request, files: List[UploadFile] = File(...)):
-    """Proxy batch file upload to SOA1 API's /upload-batch endpoint."""
     try:
         soa1_url = config.services.get("api", "http://localhost:8001")
 
         files_to_send = []
+        validation_errors = []
+
         for file in files:
             content = await file.read()
-            files_to_send.append(
-                (
-                    "files",
-                    (file.filename, content, file.content_type or "application/pdf"),
-                )
-            )
+            error = _validate_pdf_content(content, file.filename)
+            if error:
+                validation_errors.append(f"{file.filename}: {error}")
+                continue
+            files_to_send.append(("files", (file.filename, content, "application/pdf")))
 
-        # Forward session ID or original IP
-        client_ip = request.headers.get("X-Forwarded-For") or request.client.host
+        if not files_to_send:
+            return {
+                "status": "ERROR",
+                "error": "No valid PDF files",
+                "validation_errors": validation_errors,
+                "agent_response": "None of the uploaded files are valid PDFs. Please upload PDF files only.",
+            }
+
+        if validation_errors:
+            logger.warning(f"Some files failed validation: {validation_errors}")
+
+        client_ip = request.client.host
+        if not check_access(client_ip):
+            raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
+
         headers = {
             "X-Session-ID": request.headers.get("X-Session-ID") or client_ip,
             "X-Forwarded-For": client_ip,
@@ -1600,16 +1696,14 @@ async def api_proxy_upload_batch(request: Request, files: List[UploadFile] = Fil
             timeout=120,
         )
         resp.raise_for_status()
-        return resp.json()
+        result = resp.json()
+
+        if validation_errors:
+            result["validation_warnings"] = validation_errors
+
+        return result
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"Batch upload proxy error: {e}")
-        return {
-            "status": "ERROR",
-            "error": str(e),
-            "agent_response": f"Failed to upload files: {str(e)}",
-        }
-    except Exception as e:
         logger.error(f"Batch upload proxy error: {e}")
         return {
             "status": "ERROR",

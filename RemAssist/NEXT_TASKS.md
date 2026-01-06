@@ -148,23 +148,24 @@ Phinance (generate) → NemoAgent (validate) → if fail → retry/escalate to q
 - Endpoints affected: `/api/proxy/upload`, `/api/proxy/upload-batch`
 - Guardrails: Implementation detail only, API contract unchanged, no consent flow affected
 
-### S3. Zombie Task Auto-Timeout [PRIORITY: HIGH]
+### S3. Zombie Task Auto-Timeout [PRIORITY: HIGH] ✅ COMPLETE (Session 41)
 **Problem**: Background tasks can hang, leaving status as "parsing" forever
 **Impact**: Frontend polls infinitely, user stuck
 
 **Implementation**:
 - File: `home-ai/soa1/batch_processor.py`
-- In `get_batch_state()` or status check:
+- In `get_batch_state()`:
   - If status == "parsing" AND `created_at` > 10 minutes ago → auto-set "failed"
+  - Triggers status callback to persist to DB
 - Guardrails: Self-correcting read logic, doesn't interfere with active tasks
 
-### S4. Frontend Polling Timeout [PRIORITY: MEDIUM]
+### S4. Frontend Polling Timeout [PRIORITY: MEDIUM] ✅ COMPLETE (Session 41)
 **Problem**: `index.html` polls forever if status doesn't change
 **Impact**: Browser resource waste, no user feedback on failure
 
 **Implementation**:
 - File: `soa-webui/templates/index.html`
-- Add `pollAttempts` counter
+- Added `pollAttempts` counter to both `pollBatchStatus()` and `pollForAnalysisComplete()`
 - If > 300 attempts (10 min at 2s intervals) → stop polling, show timeout message
 - Guardrails: Client-side only, no backend changes
 

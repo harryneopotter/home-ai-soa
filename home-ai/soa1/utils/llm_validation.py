@@ -208,7 +208,7 @@ class AnalysisResponse(BaseModel):
     def normalize_categories(cls, v: Any) -> Dict[str, float]:
         if not isinstance(v, dict):
             return {}
-        return {k.lower().strip(): round(float(val), 2) for k, val in v.items()}
+        return {k.strip().title(): round(float(val), 2) for k, val in v.items()}
 
     @field_validator("top_merchants", mode="before")
     @classmethod
@@ -277,25 +277,80 @@ def extract_json_from_response(raw: str) -> str:
     CODE_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*([\s\S]*?)```")
     code_block_match = CODE_BLOCK_PATTERN.search(raw)
     if code_block_match:
-        return code_block_match.group(1).strip()
+        raw = code_block_match.group(1).strip()
+    elif not (raw.startswith("[") or raw.startswith("{")):
+        JSON_OBJECT_PATTERN = re.compile(r"(\[[\s\S]*\]|\{[\s\S]*\})")
+        json_match = JSON_OBJECT_PATTERN.search(raw)
+        if json_match:
+            raw = json_match.group(1)
+        else:
+            raise LLMValidationError(
+                "No JSON found in LLM response",
+                errors=["Response does not contain valid JSON structure"],
+                raw_response=raw[:500],
+                feedback_prompt=(
+                    "Your previous response did not contain valid JSON. "
+                    "Please respond with ONLY a JSON object or array, no explanatory text."
+                ),
+            )
 
-    if raw.startswith("[") or raw.startswith("{"):
-        return raw
+    return repair_json(raw)
 
-    JSON_OBJECT_PATTERN = re.compile(r"(\[[\s\S]*\]|\{[\s\S]*\})")
-    json_match = JSON_OBJECT_PATTERN.search(raw)
-    if json_match:
-        return json_match.group(1)
 
-    raise LLMValidationError(
-        "No JSON found in LLM response",
-        errors=["Response does not contain valid JSON structure"],
-        raw_response=raw[:500],
-        feedback_prompt=(
-            "Your previous response did not contain valid JSON. "
-            "Please respond with ONLY a JSON object or array, no explanatory text."
-        ),
+def repair_json(raw: str) -> str:
+    """Repair common JSON syntax errors from LLM output.
+
+    Handles phinance-3b quirks:
+    - // and /* */ comments
+    - Trailing commas before ] or }
+    - Strings outside arrays: ["a", "b"], "orphan", ] -> ["a", "b"]
+    - Double closing brackets: ]], -> ]
+    - Unquoted keys (including numeric keys like 2:)
+    - Unquoted string values (except true/false/null)
+    - Mixed dict-like entries in arrays: ["a", 2: "b"] -> ["a", "b"]
+    - Nested arrays in recommendations: [["text"]] -> ["text"]
+    - Premature closing brace
+    """
+    s = raw.strip()
+
+    s = re.sub(r"//[^\n]*", "", s)
+    s = re.sub(r"/\*[\s\S]*?\*/", "", s)
+
+    s = re.sub(r'\](\s*),\s*"[^"]*"[^,\]]*,?\s*\]', r"]", s)
+    for _ in range(3):
+        s = re.sub(r'\](\s*),\s*"[^"]*"[^,\]]*,?\s*\]', r"]", s)
+
+    s = re.sub(r",(\s*[\]\}])", r"\1", s)
+
+    s = re.sub(r"\](\s*)\](?!\s*[\]\}])", r"]", s)
+
+    s = re.sub(r'(?<!")(\b[a-zA-Z_][a-zA-Z0-9_]*\b)(?=\s*:)', r'"\1"', s)
+    s = re.sub(r"([\{\[,\s])(\d+)(\s*:)", r'\1"\2"\3', s)
+
+    def remove_array_dict_entries(match):
+        content = match.group(1)
+        content = re.sub(r',\s*"\d+"\s*:', ",", content)
+        content = re.sub(r'\[\s*"\d+"\s*:', "[", content)
+        return f"[{content}]"
+
+    s = re.sub(r"\[([^\[\]]*)\]", remove_array_dict_entries, s)
+
+    s = re.sub(r"\[\s*\[([^\[\]]*)\]\s*\]", r"[\1]", s)
+
+    s = re.sub(r'\]\s*\},\s*"potential_savings"', r'], "potential_savings"', s)
+
+    s = re.sub(
+        r":\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*([,\}\]])",
+        lambda m: f': "{m.group(1)}"{m.group(2)}'
+        if m.group(1) not in ("true", "false", "null")
+        else f": {m.group(1)}{m.group(2)}",
+        s,
     )
+
+    s = re.sub(r"\}\s*\]\s*\}$", "}}", s)
+    s = re.sub(r"\}\s*\]$", "}", s)
+
+    return s
 
 
 # =============================================================================

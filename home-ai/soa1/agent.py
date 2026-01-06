@@ -150,6 +150,29 @@ class SOA1Agent:
             state = batch_processor.get_batch_state(batch_id)
             if state:
                 lines.append(f"Processing Status: {state.status}")
+
+                # Context & Protocol Injection
+                if state.status in ("uploading", "parsing", "processing"):
+                    lines.append(
+                        "NOTE: This is a QUICK METADATA PREVIEW only. Full text extraction is running in the background."
+                    )
+                    lines.append(
+                        "PRIVACY PROTOCOL: Extracted data is NOT persisted or analyzed until user consent is explicitly given."
+                    )
+                    lines.append(
+                        "GOAL: Use this metadata (filenames/types) to acknowledge receipt and ASK FOR CONSENT to analyze."
+                    )
+                elif state.status == "ready":
+                    lines.append(
+                        "NOTE: Full extraction is COMPLETE. Preliminary findings are loaded in your context."
+                    )
+                    lines.append(
+                        "PRIVACY PROTOCOL: Do NOT reveal these findings yet. You must obtain explicit user consent first."
+                    )
+                    lines.append(
+                        "GOAL: Ask the user if they want you to analyze this data. If they say 'yes', emit [INVOKE:phinance]."
+                    )
+
                 if state.transaction_count > 0:
                     lines.append(f"Transactions Found: {state.transaction_count}")
                 if state.interesting_findings:
@@ -268,7 +291,9 @@ class SOA1Agent:
                 from home_ai.finance_agent.src import storage as fa_storage
 
                 for doc_id in doc_ids:
-                    doc_txns = [t for t in all_transactions]
+                    doc_txns = [
+                        t for t in all_transactions if t.get("doc_id") == doc_id
+                    ]
                     if doc_txns:
                         fa_storage.save_transactions_for_doc(doc_id, doc_txns)
                         logger.info(
@@ -307,29 +332,47 @@ class SOA1Agent:
             f"merchants={len(calculated['top_merchants'])}"
         )
 
-        insights_prompt = build_insights_prompt(transactions, calculated)
-        logger.info("Invoking insights model (qwen2.5) with pre-calculated data")
+        from models import call_phinance
 
-        from models import call_insights_model
-
-        raw_response = call_insights_model(insights_prompt)
+        payload = json.dumps({**calculated, "transactions": transactions})
+        raw_response, attempts = call_phinance(payload)
 
         try:
-            cleaned_response = strip_markdown_fences(raw_response)
-            llm_insights = json.loads(cleaned_response)
+            analysis = json.loads(raw_response)
         except json.JSONDecodeError:
-            llm_insights = {
+            analysis = {
+                **calculated,
                 "insights": [],
                 "recommendations": [],
                 "potential_savings": 0,
-                "verified_drains": [],
             }
 
-        analysis = merge_calculated_with_llm_response(calculated, llm_insights)
+        try:
+            from utils.llm_critic import validate_phinance_output
+
+            passed, validation = validate_phinance_output(calculated, analysis)
+            if not passed:
+                logger.warning(f"Critic issues: {validation.get('issues', [])[:2]}")
+                analysis["_critic_issues"] = validation.get("issues", [])
+        except Exception as e:
+            logger.warning(f"Critic validation skipped: {e}")
 
         if state:
             state.phinance_analysis = analysis
             state.phinance_complete_at = time.time()
+
+            if hasattr(state, "batch_id") and state.batch_id:
+                try:
+                    from home_ai.finance_agent.src import storage as chat_storage
+
+                    chat_storage.save_batch_phinance_analysis(state.batch_id, analysis)
+                    logger.info(
+                        f"Persisted phinance analysis for batch {state.batch_id}"
+                    )
+                except Exception as persist_err:
+                    logger.warning(
+                        f"Failed to persist phinance analysis: {persist_err}"
+                    )
 
         analysis_text = self._format_analysis_response(analysis, len(transactions))
 
@@ -488,6 +531,22 @@ class SOA1Agent:
                     f"Python-calculated financials: total=${calculated['total_spent']}, "
                     f"tx_count={calculated['transaction_count']}"
                 )
+
+                try:
+                    from utils.llm_critic import validate_phinance_output
+
+                    passed, validation = validate_phinance_output(
+                        calculated, analysis_dict
+                    )
+                    if not passed:
+                        logger.warning(
+                            f"Batch {batch_id} critic issues: {validation.get('issues', [])[:2]}"
+                        )
+                        analysis_dict["_critic_issues"] = validation.get("issues", [])
+                except Exception as critic_err:
+                    logger.warning(
+                        f"Critic validation skipped for batch {batch_id}: {critic_err}"
+                    )
 
             state.phinance_analysis = analysis_dict
             state.phinance_attempts = attempts

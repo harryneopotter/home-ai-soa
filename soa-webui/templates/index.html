@@ -342,7 +342,23 @@
             const statusEl = document.getElementById('uploadStatus');
             const btn = document.getElementById('uploadBtn');
             
+            // S4: Frontend polling timeout - stop after 300 attempts (~10 min at 2s intervals)
+            const MAX_POLL_ATTEMPTS = 300;
+            let pollAttempts = 0;
+            
             const interval = setInterval(async () => {
+                pollAttempts++;
+                
+                if (pollAttempts > MAX_POLL_ATTEMPTS) {
+                    clearInterval(interval);
+                    if (uploadStatusInterval) { clearInterval(uploadStatusInterval); uploadStatusInterval = null; }
+                    statusEl.textContent = `TIMEOUT: Processing took too long. Please try again.`;
+                    statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
+                    btn.disabled = false;
+                    btn.textContent = 'UPLOAD BATCH';
+                    return;
+                }
+                
                 try {
                     const response = await fetch(`/api/batch/status?batch_id=${batchId}`);
                     const data = await response.json();
@@ -401,7 +417,21 @@
             statusEl.textContent = `ANALYZING: ${batchId}...`;
             statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-neon-orange text-accent-neon-orange';
             
+            // S4: Frontend polling timeout - stop after 300 attempts (~10 min at 2s intervals)
+            const MAX_POLL_ATTEMPTS = 300;
+            let pollAttempts = 0;
+            
             const interval = setInterval(async () => {
+                pollAttempts++;
+                
+                if (pollAttempts > MAX_POLL_ATTEMPTS) {
+                    clearInterval(interval);
+                    statusEl.textContent = `TIMEOUT: Analysis took too long. Please try again.`;
+                    statusEl.className = 'mt-4 text-[10px] p-2 border border-accent-red text-accent-red';
+                    appendMessage('agent', 'Analysis timed out after 10 minutes. The batch may still be processing in the background.');
+                    return;
+                }
+                
                 try {
                     const response = await fetch(`/api/batch/status?batch_id=${batchId}`);
                     const data = await response.json();

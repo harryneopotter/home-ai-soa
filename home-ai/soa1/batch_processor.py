@@ -634,7 +634,23 @@ class BatchProcessor:
         return batch_id
 
     def get_batch_state(self, batch_id: str) -> Optional[BatchState]:
-        return self.batches.get(batch_id)
+        state = self.batches.get(batch_id)
+        if state:
+            # S3: Auto-timeout zombie tasks stuck in "parsing" for > 10 minutes
+            ZOMBIE_TIMEOUT_SECONDS = 600
+            if state.status == "parsing":
+                elapsed = time.time() - state.created_at
+                if elapsed > ZOMBIE_TIMEOUT_SECONDS:
+                    logger.warning(
+                        f"Batch {batch_id} timed out after {elapsed:.0f}s in 'parsing' state"
+                    )
+                    state.status = "failed"
+                    if self._on_status_change:
+                        try:
+                            self._on_status_change(batch_id, "failed")
+                        except Exception:
+                            pass
+        return state
 
     def update_batch_status(self, batch_id: str, status: str):
         if batch_id in self.batches:

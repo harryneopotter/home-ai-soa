@@ -21,6 +21,7 @@ from pdf_processor import pdf_processor
 from batch_processor import batch_processor
 from output_generator import output_generator
 from utils.logger import get_logger
+from utils.file_validation import validate_pdf_bytes, FileValidationError
 from utils.errors import (
     SOA1Error,
     ValidationError,
@@ -569,14 +570,17 @@ def create_app() -> FastAPI:
                 )
 
                 content_bytes = await file.read()
-                if len(content_bytes) > MAX_FILE_SIZE:
-                    raise ValidationError(
-                        f"File {file.filename} exceeds maximum size of 10MB",
-                        "file",
-                        file.filename,
-                    )
 
-                # Save raw bytes to a temporary file for background full parsing
+                try:
+                    validate_pdf_bytes(content_bytes, file.filename)
+                except FileValidationError as e:
+                    logger.warning(f"File validation failed: {e.message}")
+                    emit_pipeline_event(
+                        "validation_error",
+                        details={"file": e.filename, "error": e.message},
+                    )
+                    continue
+
                 temp_file_path = temp_dir / f"{uuid.uuid4().hex}_{file.filename}"
                 with open(temp_file_path, "wb") as f:
                     f.write(content_bytes)
@@ -803,6 +807,15 @@ def create_app() -> FastAPI:
                 except Exception:
                     pass
                 content_bytes = await file.read()
+
+                try:
+                    validate_pdf_bytes(content_bytes, file.filename)
+                except FileValidationError as e:
+                    return JSONResponse(
+                        status_code=400,
+                        content={"status": "error", "message": e.message},
+                    )
+
                 with open(dest_path, "wb") as fdest:
                     fdest.write(content_bytes)
             except Exception as e:
@@ -1097,7 +1110,7 @@ def create_app() -> FastAPI:
                 if not analysis:
                     analysis = state.calculated_summary or {}
                 data = await output_generator.generate_dashboard_json(
-                    analysis, batch_id
+                    analysis, batch_id, state.files
                 )
                 state.outputs["dashboard_json"] = data
             return data

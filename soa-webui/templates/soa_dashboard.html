@@ -1132,11 +1132,28 @@
             const totalIncome = analysisData.total_income || Math.abs(allTransactions.reduce((sum, t) => sum + (t.amount < 0 ? t.amount : 0), 0));
             const netSavings = totalIncome - totalSpent;
             const savingsRate = totalIncome > 0 ? (netSavings / totalIncome * 100).toFixed(1) : 0;
+            
+            const accountType = analysisData.account_type || 'unknown';
+            const isExpenseOnly = accountType === 'credit_card' || (accountType === 'unknown' && totalIncome === 0);
+            
+            const incomeCard = document.querySelector('.metric-card.income');
+            const savingsCard = document.querySelector('.metric-card.savings');
+            const rateCard = document.querySelector('.metric-card.rate');
+            
+            if (isExpenseOnly) {
+                incomeCard.style.display = 'none';
+                savingsCard.style.display = 'none';
+                rateCard.style.display = 'none';
+            } else {
+                incomeCard.style.display = '';
+                savingsCard.style.display = '';
+                rateCard.style.display = '';
+                document.querySelector('.metric-card.income .metric-value').textContent = '$' + totalIncome.toLocaleString();
+                document.querySelector('.metric-card.savings .metric-value').textContent = '$' + netSavings.toLocaleString();
+                document.querySelector('.metric-card.rate .metric-value').textContent = savingsRate + '%';
+            }
 
-            document.querySelector('.metric-card.income .metric-value').textContent = '$' + totalIncome.toLocaleString();
             document.querySelector('.metric-card.spending .metric-value').textContent = '$' + totalSpent.toLocaleString();
-            document.querySelector('.metric-card.savings .metric-value').textContent = '$' + netSavings.toLocaleString();
-            document.querySelector('.metric-card.rate .metric-value').textContent = savingsRate + '%';
         }
 
         function renderHiddenDrains() {

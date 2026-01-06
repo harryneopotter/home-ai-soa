@@ -1,6 +1,21 @@
+# Core web framework
 fastapi
 uvicorn
-requests
 pydantic
 python-multipart
+jinja2
 
+# HTTP clients
+requests
+httpx  # Async HTTP client (for S2 WebUI async calls)
+
+# Configuration & utilities
+pyyaml
+psutil  # System monitoring
+
+# PDF processing
+pymupdf  # PDF reading (import as fitz)
+weasyprint  # PDF report generation
+
+# Optional but recommended
+aiofiles  # Async file operations

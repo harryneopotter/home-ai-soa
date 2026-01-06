@@ -69,9 +69,11 @@ def calculate_financials(transactions: List[Dict[str, Any]]) -> Dict[str, Any]:
         amount = abs(float(tx.get("amount", 0)))
         total += amount
 
-        category = tx.get("category", "other").lower().strip()
+        category = tx.get("category", "Other").strip()
         if not category:
-            category = "other"
+            category = "Other"
+        # Normalize to Title Case for consistency
+        category = category.title()
         category_totals[category] += amount
 
         merchant = tx.get("merchant", "").strip()
@@ -256,12 +258,15 @@ def build_insights_prompt(
 
     drains_section = ""
     drains_task = ""
+    example_json = '{{"insights": ["...", "..."], "recommendations": ["...", "..."], "potential_savings": 0.00}}'
+
     if drain_lines:
         drains_section = f"""
 ### Potential Hidden Drains (small recurring charges <$50, 3+ times):
 {chr(10).join(drain_lines)}
 """
         drains_task = f"""4. drain_verifications: Review each numbered drain above. For each, determine if it's a TRUE drain (discretionary/wasteful) or FALSE (necessary expense). Return object with drain numbers as keys: {{"1": {{"is_drain": true, "reason": "brief explanation"}}, "2": {{"is_drain": false, "reason": "..."}}}}"""
+        example_json = '{{"insights": ["...", "..."], "recommendations": ["...", "..."], "potential_savings": 0.00, "drain_verifications": {{"1": {{"is_drain": true, "reason": "..."}}, "2": {{"is_drain": false, "reason": "..."}}}}}}'
 
     prompt = f"""Analyze this financial data and provide insights.
 
@@ -286,8 +291,10 @@ Based on the above ACCURATE numbers, provide:
 3. potential_savings: estimated monthly savings if recommendations are followed
 {drains_task}
 
+IMPORTANT: The "Other" category is a catch-all for uncategorized transactions. Do NOT mention "Other" in your insights or recommendations - it's not actionable. Focus on specific named categories like Shopping, Travel, Dining, etc.
+
 Respond with valid JSON only:
-{{"insights": ["...", "..."], "recommendations": ["...", "..."], "potential_savings": 0.00, "drain_verifications": {{"1": {{"is_drain": true, "reason": "..."}}, "2": {{"is_drain": false, "reason": "..."}}}}}}
+{example_json}
 """
     return prompt
 
