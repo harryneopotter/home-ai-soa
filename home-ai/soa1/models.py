@@ -8,7 +8,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 import yaml
@@ -25,6 +25,21 @@ from utils.llm_validation import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Dynamic system prompt for Phinance - passed at runtime, NOT baked into Modelfile
+# This allows schema to vary (e.g., include drain_verifications only when drains exist)
+PHINANCE_SYSTEM_PROMPT = """You are a Financial Insight Analyst providing JSON responses only.
+
+CRITICAL RULES:
+1. Output ONLY valid JSON - no markdown, no explanations, no text before or after
+2. ALL keys must be in double quotes: "insights" not insights
+3. insights and recommendations are arrays of STRINGS: ["text1", "text2"]
+4. potential_savings is a NUMBER: 150.00 not "150.00"
+5. Trust the pre-calculated numbers - do not recalculate
+
+EXACT FORMAT:
+{"insights": ["insight 1", "insight 2"], "recommendations": ["rec 1", "rec 2"], "potential_savings": 0.00}"""
 
 
 CONFIG_PATH = Path(__file__).with_name("config.yaml")
@@ -149,17 +164,17 @@ def _calculate_stats(transactions: List[Dict[str, Any]]) -> Dict[str, Any]:
     total_income = 0.0
     categories = {}
     merchants = {}
-    
+
     for t in transactions:
         amt = float(t.get("amount", 0.0))
         if amt > 0:
             total_spent += amt
         else:
             total_income += abs(amt)
-            
+
         cat = t.get("category", "Other")
         categories[cat] = categories.get(cat, 0.0) + abs(amt)
-        
+
         m = t.get("merchant", "Unknown")
         merchants[m] = merchants.get(m, 0.0) + abs(amt)
 
@@ -168,7 +183,7 @@ def _calculate_stats(transactions: List[Dict[str, Any]]) -> Dict[str, Any]:
         {"merchant": k, "total": round(v, 2)}
         for k, v in sorted(merchants.items(), key=lambda x: x[1], reverse=True)[:5]
     ]
-    
+
     # Hidden Drains (Under $50, 3+ times)
     drain_candidates = {}
     for t in transactions:
@@ -178,24 +193,28 @@ def _calculate_stats(transactions: List[Dict[str, Any]]) -> Dict[str, Any]:
             if m not in drain_candidates:
                 drain_candidates[m] = []
             drain_candidates[m].append(amt)
-            
+
     hidden_drains = []
     for m, amts in drain_candidates.items():
         if len(amts) >= 3:
             avg = sum(amts) / len(amts)
-            hidden_drains.append({
-                "merchant": m,
-                "avg_amount": round(avg, 2),
-                "frequency": len(amts),
-                "annual_cost": round(sum(amts) * 12 / (len(amts)/3), 2) # simplified annualization
-            })
+            hidden_drains.append(
+                {
+                    "merchant": m,
+                    "avg_amount": round(avg, 2),
+                    "frequency": len(amts),
+                    "annual_cost": round(
+                        sum(amts) * 12 / (len(amts) / 3), 2
+                    ),  # simplified annualization
+                }
+            )
 
     return {
         "total_spent": round(total_spent, 2),
         "total_income": round(total_income, 2),
         "categories": {k: round(v, 2) for k, v in categories.items()},
         "top_merchants": top_merchants,
-        "hidden_drains": hidden_drains
+        "hidden_drains": hidden_drains,
     }
 
 
@@ -204,16 +223,17 @@ def call_phinance(
     validate: bool = False,
     retry_config: Optional[RetryConfig] = None,
 ) -> Tuple[str, int]:
-    """Send pre-calculated stats to the Insight Analyst (powered by qwen2.5).
+    """Send pre-calculated stats to Phinance for qualitative insights.
 
     Args:
-        payload_json: JSON string with pre-calculated stats.
+        payload_json: JSON string with pre-calculated stats from calculate_financials().
         validate: If True, validates response schema.
         retry_config: If provided, enables retry with feedback.
 
     Returns:
         Tuple of (Analysis JSON string, number of attempts)
     """
+    from utils.financial_calculator import build_insights_prompt, calculate_financials
 
     if not isinstance(payload_json, str) or not payload_json.strip():
         raise ValueError("Phinance payload must be a JSON string")
@@ -223,78 +243,35 @@ def call_phinance(
     except json.JSONDecodeError as exc:
         raise ValueError("Phinance payload must be valid JSON") from exc
 
-    # INSIGHT ENGINE: Use qwen2.5 for superior reasoning
-    endpoint = _ENDPOINTS["insights"]
-    
-    # INSIGHT PROMPT: Use pre-calculated Python facts
-    insight_prompt = (
-        f"Analyze these pre-calculated statistics and provide professional financial insights:\n"
-        f"TOTAL SPENT: ${stats.get('total_spent', 0.0)}\n"
-        f"CATEGORIES: {json.dumps(stats.get('categories', {}))}\n"
-        f"TOP MERCHANTS: {json.dumps(stats.get('top_merchants', []))}\n"
-        f"HIDDEN DRAINS: {json.dumps(stats.get('hidden_drains', []))}\n\n"
-        f"Provide 3-5 specific qualitative insights and 2-3 actionable recommendations."
-    )
+    endpoint = _ENDPOINTS["phinance"]
 
-    model_payload = _build_chat_payload(endpoint, insight_prompt)
+    transactions = stats.get("transactions", [])
+    if not transactions and "total_spent" in stats:
+        user_prompt = build_insights_prompt([], stats)
+    else:
+        calculated_stats = calculate_financials(transactions)
+        user_prompt = build_insights_prompt(transactions, calculated_stats)
+        stats = calculated_stats
+
+    model_payload = _build_chat_payload(endpoint, user_prompt)
     raw_response = _dispatch_request(endpoint, model_payload, prompt_source="phinance")
-    
+
     try:
-        # ROBUST EXTRACTION: Use helper to strip chatter/markdown
         from utils.llm_validation import extract_json_from_response
+
         clean_json_str = extract_json_from_response(raw_response)
         model_json = json.loads(clean_json_str)
-        
-        # Final output is the MERGE of Python facts and AI insights
         final_result = {**stats, **model_json}
         return json.dumps(final_result), 1
     except Exception as e:
-        logger.warning(f"Failed to parse insights: {e}")
-        return json.dumps({**stats, "insights": ["Qualitative insights currently unavailable."], "recommendations": []}), 1
-
-    # Retry loop with validation feedback
-    last_error: Optional[LLMValidationError] = None
-    last_response: Optional[str] = None
-
-    for attempt in range(1, retry_config.max_attempts + 1):
-        # Build prompt (with feedback on retry)
-        if attempt == 1:
-            prompt = base_prompt
-        else:
-            context = RetryContext(
-                attempt=attempt,
-                previous_response=last_response
-                if retry_config.include_previous_response
-                else None,
-                previous_errors=last_error.errors if last_error else [],
-                feedback_prompt=last_error.feedback_prompt if last_error else None,
-            )
-            prompt = build_retry_prompt(base_prompt, context, retry_config)
-
-        model_payload = _build_chat_payload(endpoint, prompt)
-        response = _dispatch_request(
-            endpoint, model_payload, prompt_source="phinance", attempt=1
-        )
-        last_response = response
-
-        # Validate if requested
-        if not validate:
-            return response, attempt
-
-        try:
-            validate_phinance_response(response)
-            logger.info(f"Phinance validation passed on attempt {attempt}")
-            return response, attempt
-        except LLMValidationError as e:
-            last_error = e
-            logger.warning(
-                f"Phinance validation failed on attempt {attempt}/{retry_config.max_attempts}: {e.errors[:2]}"
-            )
-            if attempt == retry_config.max_attempts:
-                raise
-
-    # Should not reach here, but safety fallback
-    raise last_error or RuntimeError("Retry loop exited unexpectedly")
+        logger.warning(f"Failed to parse phinance response: {e}")
+        return json.dumps(
+            {
+                **stats,
+                "insights": ["Analysis currently unavailable."],
+                "recommendations": [],
+            }
+        ), 1
 
 
 def call_phinance_validated(
@@ -349,16 +326,222 @@ def validate_phinance_response(raw_response: str) -> None:
         )
 
 
-def _build_chat_payload(endpoint: ModelEndpoint, user_content: str) -> Dict:
-    # Prepare the user content. If a system_prompt exists in config, prepend it
-    # as instructions to the user message to keep it additive to the Modelfile's SYSTEM.
-    final_user_content = user_content
-    if endpoint.system_prompt:
-        final_user_content = f"### ADDITIONAL INSTRUCTIONS:\n{endpoint.system_prompt}\n\n### DATA TO ANALYZE:\n{user_content}"
+# Valid categories that match the Title Case standard in batch_processor.py
+VALID_CATEGORIES = [
+    "Food & Dining",
+    "Groceries",
+    "Gas",
+    "Shopping",
+    "Entertainment",
+    "Travel",
+    "Transportation",
+    "Utilities",
+    "Subscriptions",
+    "Health",
+    "Insurance",
+    "Automotive",
+    "Government & Fees",
+    "Donations",
+    "Housing",
+    "Alcohol",
+    "Transfer",
+    "Education",
+    "Personal Services",
+    "Other",
+]
+
+CATEGORIZATION_SYSTEM_PROMPT = f"""You are a financial transaction categorization specialist.
+Your task is to categorize merchant names into exactly ONE category from this list:
+{", ".join(VALID_CATEGORIES)}
+
+RULES:
+1. Output ONLY valid JSON - no markdown, no explanations
+2. Return a JSON object mapping each merchant name to its category
+3. Use EXACT category names from the list above (Title Case)
+4. If uncertain, use "Other"
+
+Example input: ["WHATABRGR #1234 DALLAS TX", "SHELL OIL", "NETFLIX.COM"]
+Example output: {{"WHATABRGR #1234 DALLAS TX": "Food & Dining", "SHELL OIL": "Gas", "NETFLIX.COM": "Subscriptions"}}"""
+
+
+def categorize_merchants_llm(merchants: List[str]) -> Dict[str, str]:
+    """Batch categorize unknown merchants using Phinance LLM.
+
+    Args:
+        merchants: List of unique merchant names to categorize
+
+    Returns:
+        Dict mapping merchant name -> category (Title Case)
+    """
+    if not merchants:
+        return {}
+
+    unique_merchants = list(set(merchants))[:100]
+    logger.info(f"LLM categorizing {len(unique_merchants)} merchants")
+
+    merchant_list = json.dumps(unique_merchants)
+    user_prompt = f'Categorize these merchants:\n{merchant_list}\n\nReturn JSON format: {{"merchant_name": "category", ...}}'
+
+    endpoint = _ENDPOINTS["phinance"]
+    payload = _build_chat_payload(
+        endpoint, user_prompt, system_prompt=CATEGORIZATION_SYSTEM_PROMPT
+    )
+
+    try:
+        raw_response = _dispatch_request(
+            endpoint, payload, prompt_source="categorization"
+        )
+
+        from utils.llm_validation import extract_json_from_response
+
+        clean_json = extract_json_from_response(raw_response)
+        result = json.loads(clean_json)
+
+        validated = {}
+        category_aliases = {
+            "Dining": "Food & Dining",
+            "Food": "Food & Dining",
+            "Restaurant": "Food & Dining",
+            "Grocery": "Groceries",
+            "Fuel": "Gas",
+            "Gasoline": "Gas",
+            "Online Shopping": "Shopping",
+            "Retail": "Shopping",
+            "Streaming": "Subscriptions",
+            "Subscription": "Subscriptions",
+            "Medical": "Health",
+            "Pharmacy": "Health",
+            "Car": "Automotive",
+            "Auto": "Automotive",
+            "Government": "Government & Fees",
+            "Fees": "Government & Fees",
+            "Charity": "Donations",
+            "Rent": "Housing",
+            "Storage": "Housing",
+            "Uber": "Transportation",
+            "Rideshare": "Transportation",
+            "Taxi": "Transportation",
+            "Airline": "Travel",
+            "Hotel": "Travel",
+            "Flight": "Travel",
+        }
+
+        for merchant, category in result.items():
+            normalized = category.strip().title()
+            if normalized in category_aliases:
+                normalized = category_aliases[normalized]
+
+            if normalized in VALID_CATEGORIES:
+                validated[merchant] = normalized
+            else:
+                logger.warning(
+                    f"LLM returned invalid category '{category}' for '{merchant}', using Other"
+                )
+                validated[merchant] = "Other"
+
+        logger.info(
+            f"LLM categorization complete: {len(validated)} merchants categorized"
+        )
+        return validated
+
+    except Exception as e:
+        logger.error(f"LLM categorization failed: {e}")
+        return {}
+
+    # Deduplicate and limit batch size
+    unique_merchants = list(set(merchants))[:100]  # Cap at 100 per batch
+
+    logger.info(f"LLM categorizing {len(unique_merchants)} merchants")
+
+    # Build prompt
+    merchant_list = json.dumps(unique_merchants)
+    user_prompt = f'Categorize these merchants:\n{merchant_list}\n\nReturn JSON format: {{"merchant_name": "category", ...}}'
+
+    endpoint = _ENDPOINTS["phinance"]
+    payload = _build_chat_payload(
+        endpoint, user_prompt, system_prompt=CATEGORIZATION_SYSTEM_PROMPT
+    )
+
+    try:
+        raw_response = _dispatch_request(
+            endpoint, payload, prompt_source="categorization"
+        )
+
+        # Parse response
+        from utils.llm_validation import extract_json_from_response
+
+        clean_json = extract_json_from_response(raw_response)
+        result = json.loads(clean_json)
+
+        # Validate and normalize categories
+        validated = {}
+        for merchant, category in result.items():
+            # Normalize category to Title Case and validate
+            normalized = category.strip().title()
+            # Map common variations
+            category_map = {
+                "Dining": "Food & Dining",
+                "Food": "Food & Dining",
+                "Restaurant": "Food & Dining",
+                "Grocery": "Groceries",
+                "Fuel": "Gas",
+                "Gasoline": "Gas",
+                "Online Shopping": "Shopping",
+                "Retail": "Shopping",
+                "Streaming": "Subscriptions",
+                "Subscription": "Subscriptions",
+                "Medical": "Health",
+                "Pharmacy": "Health",
+                "Car": "Automotive",
+                "Auto": "Automotive",
+                "Government": "Government & Fees",
+                "Fees": "Government & Fees",
+                "Charity": "Donations",
+                "Rent": "Housing",
+                "Storage": "Housing",
+                "Uber": "Transportation",
+                "Rideshare": "Transportation",
+                "Taxi": "Transportation",
+                "Airline": "Travel",
+                "Hotel": "Travel",
+                "Flight": "Travel",
+            }
+            if normalized in category_map:
+                normalized = category_map[normalized]
+
+            if normalized in VALID_CATEGORIES:
+                validated[merchant] = normalized
+            else:
+                logger.warning(
+                    f"LLM returned invalid category '{category}' for '{merchant}', using Other"
+                )
+                validated[merchant] = "Other"
+
+        logger.info(
+            f"LLM categorization complete: {len(validated)} merchants categorized"
+        )
+        return validated
+
+    except Exception as e:
+        logger.error(f"LLM categorization failed: {e}")
+        # Return empty dict - caller will use "Other" for these merchants
+        return {}
+
+
+def _build_chat_payload(
+    endpoint: ModelEndpoint, user_content: str, system_prompt: Optional[str] = None
+) -> Dict:
+    messages = []
+
+    effective_system = system_prompt or endpoint.system_prompt
+    if effective_system:
+        messages.append({"role": "system", "content": effective_system})
+
+    messages.append({"role": "user", "content": user_content})
 
     return {
         "model": endpoint.model_name,
-        "messages": [{"role": "user", "content": final_user_content}],
+        "messages": messages,
         "options": {
             "temperature": endpoint.temperature,
             "num_predict": endpoint.max_tokens,

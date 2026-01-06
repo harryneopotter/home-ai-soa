@@ -16,6 +16,10 @@ sys.path.insert(0, "/home/ryzen/projects")
 
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:8080")
 
+USE_LLM_CATEGORIZATION = (
+    False  # Disabled until Phase 3 (chat-based correction) is implemented
+)
+
 # Multi-line Apple Card pattern (Date, Merchant, Cashback %, Cashback Amt, Total Amt)
 APPLE_CARD_REGEX = re.compile(
     r"^(?P<date>\d{2}/\d{2}/\d{4})\n"
@@ -173,7 +177,7 @@ def _extract_apple_card_transactions(text: str) -> List[Dict[str, Any]]:
 def _categorize_merchant(merchant: str) -> str:
     merchant_lower = merchant.lower()
     categories = {
-        "dining": [
+        "Food & Dining": [
             "restaurant",
             "cafe",
             "coffee",
@@ -187,10 +191,37 @@ def _categorize_merchant(merchant: str) -> str:
             "doordash",
             "uber eats",
             "grubhub",
+            "deli",
+            "bakery",
+            "food",
+            "dining",
+            "kitchen",
+            "grill",
+            "wok",
+            "sushi",
+            "thai",
+            "indian",
+            "chinese",
+            "mexican",
+            "italian",
+            "kebab",
+            "shawarma",
+            "halal",
+            "tandoor",
+            "curry",
+            "hoppers",
+            "sweets",
+            "bagels",
+            "seafood",
+            "brewhouse",
+            "alehouse",
+            "confiserie",
+            "takeaway",
         ],
-        "groceries": [
+        "Groceries": [
             "grocery",
             "walmart",
+            "wal-mart",
             "target",
             "costco",
             "safeway",
@@ -198,20 +229,33 @@ def _categorize_merchant(merchant: str) -> str:
             "whole foods",
             "trader joe",
             "aldi",
+            "jewel",
+            "osco",
+            "market",
+            "mart",
+            "fruit",
+            "patel brothers",
+            "giant food",
+            "butera",
+            "suarez market",
         ],
-        "gas": ["shell", "chevron", "exxon", "mobil", "bp ", "gas", "fuel", "76 "],
-        "entertainment": [
-            "netflix",
-            "spotify",
-            "hulu",
-            "disney",
-            "amazon prime",
-            "hbo",
-            "youtube",
-            "apple tv",
-            "gaming",
+        "Gas": [
+            "shell",
+            "chevron",
+            "exxon",
+            "mobil",
+            "bp ",
+            "fuel",
+            "76 ",
+            "gas station",
+            "speedway",
+            "marathon",
+            "sunoco",
+            "valero",
+            "citgo",
+            "phillips 66",
         ],
-        "shopping": [
+        "Shopping": [
             "amazon",
             "ebay",
             "etsy",
@@ -221,20 +265,81 @@ def _categorize_merchant(merchant: str) -> str:
             "macy",
             "nike",
             "adidas",
+            "home depot",
+            "menards",
+            "lowe",
+            "micro center",
+            "lego",
+            "five below",
+            "dollar",
+            "burlington",
+            "b&h photo",
+            "lumber",
+            "hardware",
+            "parts express",
+            "newark",
+            "oneplus",
+            "anker",
+            "kindle",
+            "jockey",
+            "marks and spencer",
+            "bata",
+            "retail",
+            "store",
+            "shop",
         ],
-        "travel": [
+        "Entertainment": [
+            "netflix",
+            "spotify",
+            "hulu",
+            "disney",
+            "amazon prime",
+            "hbo",
+            "youtube",
+            "apple tv",
+            "gaming",
+            "steam",
+            "onlyfans",
+            "empire photos",
+            "fosi audio",
+        ],
+        "Travel": [
             "airline",
             "delta",
             "united",
             "american air",
             "southwest",
+            "lufthansa",
+            "air india",
+            "westjet",
+            "swiss",
             "hotel",
             "airbnb",
+            "westin",
+            "hampton",
+            "fairfield",
+            "radisson",
+            "airport",
+            "terminal",
+            "south block",
+            "iad",
+            "simplytrawell",
+        ],
+        "Transportation": [
             "uber",
             "lyft",
+            "taxi",
+            "metra",
+            "transit",
+            "hertz",
+            "avis",
+            "enterprise",
             "rental car",
+            "platepass",
+            "tollway",
+            "toll",
         ],
-        "utilities": [
+        "Utilities": [
             "electric",
             "water",
             "gas bill",
@@ -243,9 +348,24 @@ def _categorize_merchant(merchant: str) -> str:
             "at&t",
             "verizon",
             "t-mobile",
+            "comed",
+            "recycling",
+            "lakeshore recycl",
+            "huntley*utility",
+            "jnl climate",
         ],
-        "subscriptions": ["subscription", "membership", "monthly", "annual fee"],
-        "health": [
+        "Subscriptions": [
+            "subscription",
+            "membership",
+            "monthly",
+            "annual fee",
+            "openai",
+            "chatgpt",
+            "telegram premium",
+            "zoom",
+            "better.com",
+        ],
+        "Health": [
             "pharmacy",
             "cvs",
             "walgreens",
@@ -254,12 +374,134 @@ def _categorize_merchant(merchant: str) -> str:
             "dental",
             "hospital",
             "health",
+            "vitamin",
+            "mercy mychart",
+        ],
+        "Insurance": [
+            "progressive",
+            "insurance",
+            "hagerty",
+            "geico",
+            "allstate",
+            "state farm",
+        ],
+        "Automotive": [
+            "ford motor",
+            "automotive",
+            "auto parts",
+            "oreilly",
+            "car wash",
+            "restyling",
+            "obsessed garage",
+            "top notch auto",
+        ],
+        "Government & Fees": [
+            "village of",
+            "city of",
+            "usps",
+            "ilsos",
+            "ici*fee",
+            "municipal",
+            "muni-web",
+            "government",
+            "dmv",
+            "secretary of state",
+        ],
+        "Donations": [
+            "actblue",
+            "donation",
+            "charity",
+            "nonprofit",
+        ],
+        "Housing": [
+            "storage",
+            "firstservice",
+            "property management",
+            "rent",
+            "mortgage",
+        ],
+        "Alcohol": [
+            "liquor",
+            "wine",
+            "beer",
+            "spirits",
+            "lith liquor",
+            "singla liquor",
         ],
     }
     for category, keywords in categories.items():
         if any(kw in merchant_lower for kw in keywords):
             return category
-    return "other"
+    return "Other"
+
+
+def _llm_categorize_unknown_merchants(
+    transactions: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Categorize 'Other' merchants using LLM with caching."""
+    if not USE_LLM_CATEGORIZATION:
+        return transactions
+
+    other_merchants = set()
+    for tx in transactions:
+        if tx.get("category") == "Other":
+            other_merchants.add(tx.get("merchant", ""))
+
+    other_merchants.discard("")
+    if not other_merchants:
+        logger.info("No 'Other' merchants to categorize via LLM")
+        return transactions
+
+    logger.info(
+        f"Found {len(other_merchants)} unique 'Other' merchants, checking cache..."
+    )
+
+    try:
+        from home_ai.finance_agent.src import storage as fa_storage
+
+        cached = fa_storage.get_merchant_mappings_batch(list(other_merchants))
+        cached_count = len(cached)
+        logger.info(f"Cache hit: {cached_count}/{len(other_merchants)} merchants")
+
+        uncached = [m for m in other_merchants if m not in cached]
+
+        llm_results = {}
+        if uncached:
+            logger.info(f"Calling LLM for {len(uncached)} uncached merchants")
+            from models import categorize_merchants_llm
+
+            llm_results = categorize_merchants_llm(uncached)
+
+            if llm_results:
+                mappings_to_save = [
+                    {"raw_name": merchant, "category": category}
+                    for merchant, category in llm_results.items()
+                ]
+                saved_count = fa_storage.upsert_merchant_mappings_batch(
+                    mappings_to_save, source="phinance"
+                )
+                logger.info(f"Cached {saved_count} new LLM categorizations")
+
+        category_map = {}
+        for merchant, mapping in cached.items():
+            category_map[merchant] = mapping.get("category", "Other")
+        category_map.update(llm_results)
+
+        updated_count = 0
+        for tx in transactions:
+            merchant = tx.get("merchant", "")
+            if tx.get("category") == "Other" and merchant in category_map:
+                new_cat = category_map[merchant]
+                if new_cat != "Other":
+                    tx["category"] = new_cat
+                    updated_count += 1
+
+        logger.info(f"LLM categorization updated {updated_count} transactions")
+        return transactions
+
+    except Exception as e:
+        logger.error(f"LLM categorization failed: {e}")
+        return transactions
 
 
 def _build_interesting_findings(
@@ -460,35 +702,55 @@ class BatchProcessor:
         except Exception as e:
             logger.warning(f"Failed to save batch text to DB: {e}")
 
-        # 3. Regex transaction extraction
+        # 3. Regex transaction extraction - PER DOCUMENT with doc_id tagging
         try:
             self.update_batch_status(batch_id, "extracting")
             _emit_event("extraction_start", batch_id, {"text_length": len(all_text)})
 
-            if is_apple_card_batch:
-                logger.info("Using Apple Card multi-line state machine parser")
-                transactions = _extract_apple_card_transactions(all_text)
-            else:
-                logger.info("Using Generic Bank regex pattern")
-                transactions = _regex_extract(all_text, GENERIC_BANK_REGEX)
+            all_transactions = []
+            for doc in state.files:
+                doc_id = doc.get("doc_id")
+                text = doc.get("full_text", "")
+                is_apple = doc.get("is_apple_card", False)
+
+                if not text:
+                    continue
+
+                if is_apple:
+                    logger.info(f"Using Apple Card parser for {doc_id}")
+                    doc_transactions = _extract_apple_card_transactions(text)
+                else:
+                    logger.info(f"Using Generic Bank regex for {doc_id}")
+                    doc_transactions = _regex_extract(text, GENERIC_BANK_REGEX)
+
+                # Tag each transaction with its source doc_id
+                for tx in doc_transactions:
+                    tx["doc_id"] = doc_id
+
+                all_transactions.extend(doc_transactions)
+                logger.info(
+                    f"Extracted {len(doc_transactions)} transactions from {doc_id}"
+                )
 
             _emit_event(
                 "extraction_complete",
                 batch_id,
-                {"transaction_count": len(transactions)},
+                {"transaction_count": len(all_transactions)},
             )
 
-            state.extracted_transactions = transactions
-            state.transaction_count = len(transactions)
+            all_transactions = _llm_categorize_unknown_merchants(all_transactions)
 
-            if transactions:
+            state.extracted_transactions = all_transactions
+            state.transaction_count = len(all_transactions)
+
+            if all_transactions:
                 from utils.financial_calculator import calculate_financials
 
-                calculated = calculate_financials(transactions)
+                calculated = calculate_financials(all_transactions)
                 state.calculated_summary = calculated
 
                 state.interesting_findings = _build_interesting_findings(
-                    transactions, calculated
+                    all_transactions, calculated
                 )
                 _emit_event(
                     "calculation_complete",
@@ -526,7 +788,7 @@ class BatchProcessor:
             analysis = state.phinance_analysis
 
             dashboard_task = asyncio.create_task(
-                generator.generate_dashboard_json(analysis, batch_id)
+                generator.generate_dashboard_json(analysis, batch_id, state.files)
             )
             pdf_task = asyncio.create_task(generator.build_pdf_command(analysis))
             infographic_task = asyncio.create_task(

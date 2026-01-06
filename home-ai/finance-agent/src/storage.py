@@ -66,13 +66,16 @@ def init_db() -> sqlite3.Connection:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS merchant_mappings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            raw_name TEXT NOT NULL,
-            normalized_name TEXT NOT NULL UNIQUE,
+            merchant_stable_id TEXT NOT NULL UNIQUE,
+            raw_name TEXT,
+            normalized_name TEXT NOT NULL,
             category TEXT,
             confidence_score REAL DEFAULT 0.0,
+            source TEXT DEFAULT 'regex',
+            flagged INTEGER DEFAULT 0,
             times_confirmed INTEGER DEFAULT 0,
             last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (raw_name, category)
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -211,27 +214,42 @@ def add_user(user_id: str, is_admin: bool = False) -> None:
 
 
 def upsert_merchant_mapping(
+    merchant_stable_id: str,
     raw_name: str,
     normalized_name: str,
     category: Optional[str],
     confidence: float = 0.0,
+    source: str = "regex",
+    flagged: int = 0,
 ) -> int:
     """
-    Insert or update merchant mapping.
+    Insert or update merchant mapping by stable_id.
     Returns the mapping ID.
     """
     with get_db() as conn:
         cursor = conn.execute(
             """
             INSERT INTO merchant_mappings
-                (raw_name, normalized_name, category, confidence_score)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(raw_name, category) DO UPDATE SET
-                confidence_score = excluded.confidence_score + 1,
+                (merchant_stable_id, raw_name, normalized_name, category, confidence_score, source, flagged)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(merchant_stable_id) DO UPDATE SET
+                category = excluded.category,
+                confidence_score = excluded.confidence_score,
+                source = excluded.source,
+                flagged = excluded.flagged,
                 times_confirmed = times_confirmed + 1,
-                last_seen = CURRENT_TIMESTAMP
+                last_seen = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
         """,
-            (raw_name, normalized_name, category, confidence),
+            (
+                merchant_stable_id,
+                raw_name,
+                normalized_name,
+                category,
+                confidence,
+                source,
+                flagged,
+            ),
         )
 
         conn.commit()
@@ -239,35 +257,142 @@ def upsert_merchant_mapping(
 
 
 def get_merchant_mapping(
-    raw_name: str, category: Optional[str] = None
+    merchant_stable_id: Optional[str] = None,
+    raw_name: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Fetch merchant mapping by raw name and optional category.
-    Returns normalized name, category, and confidence score.
+    Fetch merchant mapping by stable_id (preferred) or raw_name (fallback).
+    Returns mapping dict with all fields.
     """
     with get_db() as conn:
-        if category:
+        if merchant_stable_id:
             row = conn.execute(
                 """
-                SELECT normalized_name, category, confidence_score
+                SELECT merchant_stable_id, raw_name, normalized_name, category, 
+                       confidence_score, source, flagged
                 FROM merchant_mappings
-                WHERE raw_name = ? AND category = ?
+                WHERE merchant_stable_id = ?
             """,
-                (raw_name, category),
+                (merchant_stable_id,),
             ).fetchone()
-        else:
+        elif raw_name:
             row = conn.execute(
                 """
-                SELECT normalized_name, category, confidence_score
+                SELECT merchant_stable_id, raw_name, normalized_name, category,
+                       confidence_score, source, flagged
                 FROM merchant_mappings
                 WHERE raw_name = ?
             """,
                 (raw_name,),
             ).fetchone()
+        else:
+            return None
 
         if row:
-            return {"normalized_name": row[0], "category": row[1], "confidence": row[2]}
+            return {
+                "merchant_stable_id": row[0],
+                "raw_name": row[1],
+                "normalized_name": row[2],
+                "category": row[3],
+                "confidence": row[4],
+                "source": row[5],
+                "flagged": row[6],
+            }
     return None
+
+
+def get_merchant_mappings_batch(raw_names: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Fetch multiple merchant mappings by raw_name in a single query.
+
+    Returns dict mapping raw_name -> mapping dict for found merchants.
+    """
+    if not raw_names:
+        return {}
+
+    with get_db() as conn:
+        placeholders = ",".join(["?" for _ in raw_names])
+        rows = conn.execute(
+            f"""
+            SELECT merchant_stable_id, raw_name, normalized_name, category,
+                   confidence_score, source, flagged
+            FROM merchant_mappings
+            WHERE raw_name IN ({placeholders})
+            """,
+            raw_names,
+        ).fetchall()
+
+        result = {}
+        for row in rows:
+            result[row[1]] = {
+                "merchant_stable_id": row[0],
+                "raw_name": row[1],
+                "normalized_name": row[2],
+                "category": row[3],
+                "confidence": row[4],
+                "source": row[5],
+                "flagged": row[6],
+            }
+        return result
+
+
+def upsert_merchant_mappings_batch(
+    mappings: List[Dict[str, Any]],
+    source: str = "phinance",
+) -> int:
+    """Batch upsert merchant mappings. Returns count of rows affected.
+
+    Each mapping dict should have: raw_name, category
+    Optional: merchant_stable_id, normalized_name, confidence, flagged
+    """
+    if not mappings:
+        return 0
+
+    import hashlib
+
+    with get_db() as conn:
+        count = 0
+        for m in mappings:
+            raw_name = m.get("raw_name", "")
+            if not raw_name:
+                continue
+
+            stable_id = (
+                m.get("merchant_stable_id")
+                or hashlib.sha256(raw_name.lower().encode()).hexdigest()[:16]
+            )
+            normalized = m.get("normalized_name", raw_name)
+            category = m.get("category", "Other")
+            confidence = m.get("confidence", 0.8)
+            flagged = 1 if category == "Other" else 0
+
+            conn.execute(
+                """
+                INSERT INTO merchant_mappings
+                    (merchant_stable_id, raw_name, normalized_name, category, confidence_score, source, flagged)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(merchant_stable_id) DO UPDATE SET
+                    category = excluded.category,
+                    confidence_score = excluded.confidence_score,
+                    source = excluded.source,
+                    flagged = excluded.flagged,
+                    times_confirmed = times_confirmed + 1,
+                    last_seen = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    stable_id,
+                    raw_name,
+                    normalized,
+                    category,
+                    confidence,
+                    source,
+                    flagged,
+                ),
+            )
+            count += 1
+
+        conn.commit()
+        return count
 
 
 def insert_transactions(
