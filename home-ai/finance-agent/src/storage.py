@@ -813,15 +813,37 @@ def get_batch_extracted_text(batch_id: str) -> Optional[str]:
         return decompress_text(row[0])
 
 
-def save_batch_phinance_analysis(batch_id: str, analysis: Dict[str, Any]) -> None:
-    """Save Phinance analysis JSON for a batch."""
+def save_batch_phinance_analysis(batch_id: str, analysis: Dict[str, Any]) -> bool:
+    """Save Phinance analysis JSON for a batch.
+
+    Returns True if save succeeded, False if batch record doesn't exist.
+    If UPDATE affects 0 rows, attempts INSERT to create the record.
+    """
     analysis_json = json.dumps(analysis)
     with get_db() as conn:
-        conn.execute(
+        cursor = conn.execute(
             "UPDATE batches SET phinance_analysis = ?, updated_at = CURRENT_TIMESTAMP WHERE batch_id = ?",
             (analysis_json, batch_id),
         )
+
+        if cursor.rowcount == 0:
+            # Batch record doesn't exist - create it with minimal info
+            # This prevents silent data loss when analysis completes but batch wasn't tracked
+            try:
+                conn.execute(
+                    """INSERT INTO batches (batch_id, session_id, status, phinance_analysis, updated_at)
+                       VALUES (?, ?, 'analysis_only', ?, CURRENT_TIMESTAMP)""",
+                    (batch_id, f"recovered_{batch_id[:8]}", analysis_json),
+                )
+            except sqlite3.IntegrityError:
+                # Race condition - another process inserted it
+                conn.execute(
+                    "UPDATE batches SET phinance_analysis = ?, updated_at = CURRENT_TIMESTAMP WHERE batch_id = ?",
+                    (analysis_json, batch_id),
+                )
+
         conn.commit()
+        return True
 
 
 def get_batch_phinance_analysis(batch_id: str) -> Optional[Dict[str, Any]]:

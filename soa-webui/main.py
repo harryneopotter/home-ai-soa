@@ -16,6 +16,7 @@ import yaml
 import logging
 import psutil
 import requests
+import httpx
 import socket
 from datetime import datetime
 from typing import Optional, Dict, List, Any
@@ -1514,7 +1515,6 @@ async def analysis_status(doc_id: str):
 async def api_chat(request: Request):
     """Proxy chat requests to SOA1 API."""
     try:
-        # Enforce IP Whitelist
         client_ip = request.client.host
         if not check_access(client_ip):
             raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
@@ -1522,16 +1522,14 @@ async def api_chat(request: Request):
         body = await request.json()
         soa1_url = config.services.get("api", "http://localhost:8001")
 
-        # Forward original IP and session ID
         headers = {
             "X-Session-ID": request.headers.get("X-Session-ID") or client_ip,
             "X-Forwarded-For": client_ip,
         }
 
-        resp = requests.post(
-            f"{soa1_url}/api/chat", json=body, headers=headers, timeout=120
-        )
-        return resp.json()
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(f"{soa1_url}/api/chat", json=body, headers=headers)
+            return resp.json()
     except Exception as e:
         logger.error(f"Chat proxy error: {e}")
         return {
@@ -1544,7 +1542,6 @@ async def api_chat(request: Request):
 async def api_chat_stream(request: Request):
     """Proxy streaming chat requests to SOA1 API (SSE)."""
     try:
-        # Enforce IP Whitelist
         client_ip = request.client.host
         if not check_access(client_ip):
             raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
@@ -1552,25 +1549,24 @@ async def api_chat_stream(request: Request):
         body = await request.json()
         soa1_url = config.services.get("api", "http://localhost:8001")
 
-        # Forward original IP and session ID
         headers = {
             "X-Session-ID": request.headers.get("X-Session-ID") or client_ip,
             "X-Forwarded-For": client_ip,
             "Content-Type": "application/json",
         }
 
-        def stream_generator():
+        async def stream_generator():
             try:
-                with requests.post(
-                    f"{soa1_url}/api/chat/stream",
-                    json=body,
-                    headers=headers,
-                    stream=True,
-                    timeout=120,
-                ) as resp:
-                    for line in resp.iter_lines():
-                        if line:
-                            yield line.decode() + "\n"
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{soa1_url}/api/chat/stream",
+                        json=body,
+                        headers=headers,
+                    ) as resp:
+                        async for line in resp.aiter_lines():
+                            if line:
+                                yield line + "\n"
             except Exception as e:
                 logger.error(f"Chat stream error: {e}")
                 yield f'data: {{"error": "{str(e)}"}}\n'
@@ -1581,7 +1577,7 @@ async def api_chat_stream(request: Request):
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",  # Disable nginx buffering if present
+                "X-Accel-Buffering": "no",
             },
         )
     except Exception as e:
@@ -1629,9 +1625,6 @@ async def api_proxy_upload(request: Request, file: UploadFile = File(...)):
         if validation_error:
             return {"status": "error", "message": validation_error}
 
-        files = {"file": (file.filename, content, "application/pdf")}
-
-        # Forward session ID or original IP
         client_ip = request.client.host
         if not check_access(client_ip):
             raise HTTPException(status_code=403, detail="Access denied: IP not allowed")
@@ -1641,13 +1634,13 @@ async def api_proxy_upload(request: Request, file: UploadFile = File(...)):
             "X-Forwarded-For": client_ip,
         }
 
-        # Forward to SOA1 API
-        resp = requests.post(
-            f"{soa1_url}/upload-pdf", files=files, headers=headers, timeout=120
-        )
-
-        # Return response
-        return resp.json()
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{soa1_url}/upload-pdf",
+                files={"file": (file.filename, content, "application/pdf")},
+                headers=headers,
+            )
+            return resp.json()
     except Exception as e:
         logger.error(f"Upload proxy error: {e}")
         return {"status": "error", "message": f"Proxy upload failed: {str(e)}"}
@@ -1689,21 +1682,21 @@ async def api_proxy_upload_batch(request: Request, files: List[UploadFile] = Fil
             "X-Forwarded-For": client_ip,
         }
 
-        resp = requests.post(
-            f"{soa1_url}/upload-batch",
-            files=files_to_send,
-            headers=headers,
-            timeout=120,
-        )
-        resp.raise_for_status()
-        result = resp.json()
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{soa1_url}/upload-batch",
+                files=files_to_send,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            result = resp.json()
 
         if validation_errors:
             result["validation_warnings"] = validation_errors
 
         return result
 
-    except requests.exceptions.RequestException as e:
+    except httpx.HTTPStatusError as e:
         logger.error(f"Batch upload proxy error: {e}")
         return {
             "status": "ERROR",
@@ -1728,11 +1721,10 @@ async def api_proxy_output(batch_id: str, format: str):
         elif format == "analysis":
             actual_format = "dashboard"
 
-        resp = requests.get(
-            f"{soa1_url}/api/output/{batch_id}/{actual_format}", timeout=10
-        )
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{soa1_url}/api/output/{batch_id}/{actual_format}")
 
-        if not resp.ok:
+        if resp.status_code >= 400:
             return {"status": "error", "message": f"SOA1 error: {resp.status_code}"}
 
         data = resp.json()
@@ -1812,12 +1804,13 @@ async def get_batch_status(batch_id: str):
     soa1_url = config.services.get("api", "http://localhost:8001")
 
     try:
-        resp = requests.get(f"{soa1_url}/api/batch/status/{batch_id}", timeout=10)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{soa1_url}/api/batch/status/{batch_id}")
         if resp.status_code == 404:
             return {"status": "not_found", "batch_id": batch_id}
         resp.raise_for_status()
         return resp.json()
-    except requests.exceptions.RequestException as e:
+    except httpx.HTTPStatusError as e:
         logger.error(f"Failed to get batch status from SOA1: {e}")
         return {"status": "error", "batch_id": batch_id, "error": str(e)}
 
