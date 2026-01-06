@@ -348,12 +348,13 @@ class SOA1Agent:
             }
 
         try:
-            from utils.llm_critic import validate_phinance_output
+            from utils.llm_critic import critic_and_retry
 
-            passed, validation = validate_phinance_output(calculated, analysis)
-            if not passed:
-                logger.warning(f"Critic issues: {validation.get('issues', [])[:2]}")
-                analysis["_critic_issues"] = validation.get("issues", [])
+            analysis, validation = critic_and_retry(calculated, analysis, max_retries=1)
+            if not validation.get("pass", True):
+                logger.warning(
+                    f"Critic issues (after retry): {validation.get('issues', [])[:2]}"
+                )
         except Exception as e:
             logger.warning(f"Critic validation skipped: {e}")
 
@@ -533,16 +534,15 @@ class SOA1Agent:
                 )
 
                 try:
-                    from utils.llm_critic import validate_phinance_output
+                    from utils.llm_critic import critic_and_retry
 
-                    passed, validation = validate_phinance_output(
-                        calculated, analysis_dict
+                    analysis_dict, validation = critic_and_retry(
+                        calculated, analysis_dict, max_retries=1
                     )
-                    if not passed:
+                    if not validation.get("pass", True):
                         logger.warning(
-                            f"Batch {batch_id} critic issues: {validation.get('issues', [])[:2]}"
+                            f"Batch {batch_id} critic issues (after retry): {validation.get('issues', [])[:2]}"
                         )
-                        analysis_dict["_critic_issues"] = validation.get("issues", [])
                 except Exception as critic_err:
                     logger.warning(
                         f"Critic validation skipped for batch {batch_id}: {critic_err}"
