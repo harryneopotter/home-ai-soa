@@ -1,7 +1,7 @@
 # 📋 RemAssist — Unified Task Queue
 *Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-_Last updated: January 6, 2026 (Session 40 - LLM-Assisted Merchant Categorization)_
+_Last updated: January 6, 2026 (Session 41 - Stability Fixes + Phinance Context Window)_
 
 ---
 
@@ -22,6 +22,7 @@ _Last updated: January 6, 2026 (Session 40 - LLM-Assisted Merchant Categorizatio
 - ✅ **Phase 1 Code Complete**: Transaction duplication fix deployed, cleanup script run (removed 223 dupes)
 - ✅ **Phinance JSON Repair**: 10/10 success rate with improved `repair_json()` function (Session 35)
 - ✅ **PDF Upload Validation**: Extension + magic byte validation prevents non-PDF uploads (Session 36)
+- ✅ **Phinance Context Window**: Set to 4096 tokens - DO NOT CHANGE (Session 41)
 
 ---
 

@@ -1,6 +1,6 @@
 # 📋 Services Configuration
 
-_Last updated: December 31, 2025_
+_Last updated: January 6, 2026 (Session 41)_
 
 ## 🏁 Overview
 This document provides a comprehensive reference for all SOA1 services, their configurations, ports, and purposes.
@@ -44,8 +44,14 @@ This document provides a comprehensive reference for all SOA1 services, their co
 - **Model Settings**:
   - `num_gpu: 99` — Force full GPU offload
   - `num_ctx: 32768` — NemoAgent context window
-  - `num_ctx: 4096` — phinance-json context window
   - `keep_alive: -1` — Models stay loaded indefinitely
+
+### ⚠️ Phinance Context Window — DO NOT CHANGE
+- **`num_ctx`: 4096** (set in `home-ai/soa1/models.py` line ~549)
+- Prompt sends **aggregated summaries only**, not raw transactions
+- Typical usage: ~1000 tokens (system ~133 + user ~550 + response ~300)
+- Analyzed Jan 6, 2026: 4K provides 3K+ headroom, 32K was massive overkill
+- **DO NOT increase** — wastes VRAM, no benefit
 
 ## 🔐 Consent-Gated Analysis Flow
 

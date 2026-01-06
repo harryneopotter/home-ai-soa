@@ -122,12 +122,26 @@ Total free: ~10 GB across both GPUs
 | Model | Size | Purpose | Status |
 |-------|------|---------|--------|
 | `NemoAgent:latest` | 8.7 GB | Orchestrator | ✅ Primary |
-| `phinance-json:latest` | 2.2 GB | Finance extraction | ✅ Primary |
+| `phinance-json:latest` | 2.2 GB | Finance specialist | ✅ Primary |
 | `qwen2.5:7b-instruct` | 4.7 GB | General assistant | Available |
 | `llama3.3:latest` | 42 GB | Large reasoning | Available (needs both GPUs) |
 | `qwq:latest` | 19 GB | Reasoning | Available |
 | `deepseek-r1:8b` | 5.2 GB | Reasoning | Available |
 | `nomic-embed-text:latest` | 274 MB | Embeddings | Available |
+
+### Phinance Context Window — DO NOT CHANGE ⚠️
+
+| Setting | Value | Location |
+|---------|-------|----------|
+| **`num_ctx`** | **4096** | `home-ai/soa1/models.py` line ~549 |
+
+**Why 4K is correct:**
+- Prompt sends **aggregated summaries only**, not raw transactions
+- Typical usage: ~1000 tokens (system ~133 + user ~550 + response ~300)
+- Headroom: 3000+ tokens (75% unused)
+- Analyzed Jan 6, 2026: 32K was massive overkill, wasting VRAM
+
+**DO NOT increase `num_ctx`** — it wastes GPU memory with zero benefit.
 
 ### Ollama Endpoints
 - **API**: `http://localhost:11434`

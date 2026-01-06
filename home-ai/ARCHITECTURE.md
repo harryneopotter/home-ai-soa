@@ -1,7 +1,7 @@
 # 🏗️ SOA1 Home Assistant - System Architecture
 
-**Version**: 1.1  
-**Last Updated**: January 2, 2026 (Session 22)  
+**Version**: 1.2  
+**Last Updated**: January 6, 2026 (Session 41)  
 **Hardware**: Intel X670 + 2x NVIDIA RTX 5060 Ti (16GB each, 32GB total VRAM)
 
 ---
@@ -208,6 +208,13 @@ Specialists are **callable modules**, NOT autonomous agents. They:
 - Temperature: 0.05 (deterministic)
 - Format: JSON enforced
 - GPU Assignment: GPU 1 (16GB VRAM)
+
+#### ⚠️ Phinance Context Window — DO NOT CHANGE
+- **`num_ctx`: 4096** (set in `home-ai/soa1/models.py` line ~549)
+- Prompt sends **aggregated summaries only**, not raw transactions
+- Typical usage: ~1000 tokens (system ~133 + user ~550 + response ~300)
+- Analyzed Jan 6, 2026: 4K provides 3K+ headroom, 32K was massive overkill
+- **DO NOT increase** — wastes VRAM, no benefit
 
 **Input Schema**:
 ```json

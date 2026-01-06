@@ -546,7 +546,12 @@ def _build_chat_payload(
             "temperature": endpoint.temperature,
             "num_predict": endpoint.max_tokens,
             "num_gpu": 99,
-            "num_ctx": 32768,
+            # DO NOT CHANGE num_ctx - 4096 is sufficient for Phinance.
+            # Prompt sends aggregated summaries (~550 tokens), not raw transactions.
+            # Typical total usage: ~1000 tokens. 4K provides 3K+ headroom.
+            # Analyzed Jan 6, 2026: 32K was massive overkill, wasting VRAM.
+            # See AGENTS.md and HARDWARE_SPECS.md for documentation.
+            "num_ctx": 4096,
         },
         "stream": False,
         "keep_alive": -1,

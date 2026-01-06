@@ -1,3 +1,25 @@
+### January 6, 2026 - Stability Fixes + Phinance Context Window (Session 41)
+
+#### Stability Tasks Completed
+- **S3: Zombie Task Auto-Timeout** - Added 10-min timeout in `batch_processor.py` for tasks stuck in "parsing"
+- **S4: Frontend Polling Timeout** - Added 300-attempt limit (~10 min) in `index.html` for both batch status and analysis polling
+
+#### Phinance Context Window Optimization
+- **Changed `num_ctx` from 32768 → 4096** in `models.py`
+- **Analysis**: Prompt sends aggregated summaries (~550 tokens), not raw transactions
+- **Typical usage**: ~1000 tokens total (system ~133 + user ~550 + response ~300)
+- **Headroom**: 3000+ tokens (75% unused) - 4K is more than sufficient
+- **Impact**: Reduces VRAM waste, 32K was massive overkill
+- **Documentation**: Added "DO NOT CHANGE" warnings in AGENTS.md, HARDWARE_SPECS.md, SERVICES_CONFIG.md, ARCHITECTURE.md
+
+#### Commits
+- `3d8c3e1` feat: stability improvements + multi-session fixes (S37-S41)
+- `64b55bd` feat: add PDF validation and LLM critic utilities
+- `2c2dad5` docs: add implementation guides and analysis docs
+- `1f0cde1` chore: update .gitignore for temp analysis/debug files
+
+---
+
 ### January 6, 2026 - LLM-Assisted Merchant Categorization (Session 40)
 
 #### Feature Implemented

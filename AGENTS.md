@@ -63,6 +63,13 @@
 - See `RemAssist/PROGRESSIVE_FLOW.md` for the 4-phase pipeline
 - Key: Python regex extracts transactions, LLM provides insights only
 
+### Phinance Context Window — DO NOT CHANGE
+- **`num_ctx`: 4096** (set in `home-ai/soa1/models.py` line ~549)
+- Prompt sends **aggregated summaries only**, not raw transactions
+- Typical usage: ~1000 tokens (system + user + response)
+- Analyzed Jan 6, 2026: 4K provides 3K+ headroom, 32K was massive overkill
+- **DO NOT increase** — wastes VRAM, no benefit
+
 ---
 
 ## 📋 Session Documentation
