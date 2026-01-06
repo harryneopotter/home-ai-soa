@@ -106,3 +106,10 @@ The actual object passed to `agent.ask()`.
 1.  **Orchestrator** sees **Metadata + Summary Stats**. It knows *about* the data (file types, totals, key findings) but doesn't see the *rows*.
 2.  **Specialist** sees **Aggregates + Patterns**. It relies on Python for the math.
 3.  **Frontend** sees **JSON Reports**. The final dashboard JSON is pre-generated and served statically/via API, bypassing the LLM for display.
+
+---
+
+## Update: January 6, 2026
+
+### Current Data Flow Integrity Issue
+- **Persistence Failure**: While the specialist generates the `phinance_analysis` JSON, it is currently failing to persist to the `batches` table in the SQLite database. Data flow is interrupted between Specialist completion and Frontend retrieval.

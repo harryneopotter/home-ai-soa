@@ -454,3 +454,24 @@ tail -f /home/ryzen/projects/soa-webui/logs/soa-webui.log
 ---
 
 *This document reflects the current project state. Update after significant changes.*
+
+---
+
+## Update: January 6, 2026 (Session 35)
+
+### Current Status
+- **Phinance JSON Stability**: Achieved 10/10 JSON parse success rate using enhanced `repair_json()` and improved prompts.
+- **E2E Pipeline**: Verified end-to-end flow with Apple Card statements. Total analysis time ~15s for 4 documents.
+
+### 🔴 Critical Issues (New)
+- **Analysis Persistence Failure**: `phinance_analysis` results are NOT being saved to the `batches` table in SQLite upon completion. This prevents dashboard generation and report retrieval.
+- **Logging Failure**: `/api/log/analysis/{doc_id}` endpoint returns 404, hindering debugging of LLM interactions.
+- **Merchant Categorization Timeout**: Background tasks for categorizing "Other" merchants are timing out.
+
+### ⚠️ Known Issues (Updated)
+- **Transaction Duplication**: Confirmed bug where transactions are saved to all documents instead of being filtered by `doc_id` (fixing in Task 0.5).
+- **"Other" Category Bloat**: ~65% of transactions are categorized as "Other". Categorization engine implementation in progress.
+
+### Recent Accomplishments
+- Implemented `fin-benchmark/` suite for model A/B testing.
+- Successful instrumented E2E run with step-by-step timing.
