@@ -27,14 +27,14 @@ This is a local-only home assistant agent designed for privacy and security, run
 ### 📂 Directory Structure
 
 *   **`/home-ai`**: The core backend monorepo.
-    *   `soa1/`: Main Agent API service (`api.py`, `agent.py`).
+    *   `soa1/`: Main Agent API service (`api.py`, `agent.py`, `batch_processor.py`).
     *   `finance-agent/`: Specialized finance analysis agent.
     *   `memlayer/`: Client code for the Memory Layer.
 *   **`/soa-webui`**: The "Tailscale Edition" frontend dashboard (`main.py`).
 *   **`/RemAssist`**: Project management, history, and documentation.
+*   **`/plan/map`**: Architecture maps and data flow diagrams (see `GEMINI.md` there).
 *   **`/scripts`**: Utility scripts for starting/stopping services.
 *   **`/llamafarm` & `/llamafarm_clean`**: Inference engine/model server (ignored in git).
-*   **`/memlayer_repo`**: The Memory Layer service source (ignored in git).
 
 ### 🔌 Services & Ports
 
@@ -44,16 +44,16 @@ This is a local-only home assistant agent designed for privacy and security, run
 | **Web UI** | `8080` | Frontend Dashboard (FastAPI/Jinja2) |
 | **MemLayer** | `8000` | Long-term memory service |
 | **Ollama** | `11434`| Local LLM inference provider |
-| **Web Interface** | `8002` | Chat interface (legacy/secondary) |
 | **Monitor** | `8003` | Service health monitoring |
 
 ### 🛠️ Key Technologies
 
-*   **Language**: Python 3.8+
+*   **Hardware**: Intel i5-12600K, 128GB RAM, 2x NVIDIA RTX 5060 Ti (16GB VRAM each).
+*   **Language**: Python 3.10+
 *   **Framework**: FastAPI, Uvicorn
-*   **AI/ML**: Ollama (`NemoAgent:latest`, `phinance-json:latest`), LlamaFarm
-*   **Memory**: MemLayer (User: `sachin`)
-*   **Network**: Tailscale (Secure remote access, IP whitelisting)
+*   **AI/ML**: Ollama (`NemoAgent:latest`, `phinance-json:latest`, `qwen2.5:7b-instruct`).
+*   **Memory**: MemLayer (Current), MemGraph (Planned).
+*   **Network**: Tailscale (Secure remote access).
 
 ### ⚙️ Configuration
 

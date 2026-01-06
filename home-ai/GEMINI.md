@@ -6,28 +6,31 @@ The core functionality revolves around a `SOA1Agent` that can:
 - Receive user queries through a FastAPI-based REST API.
 - Access a long-term memory system (`MemLayer`) to store and retrieve user-specific facts and conversation history.
 - Use a local large language model (`Ollama`) to generate intelligent and context-aware responses.
+- Delegate complex financial analysis to a specialized `Phinance` pipeline using a hybrid calculation engine.
 - Ground its answers in stored memories to provide personalized and relevant assistance.
 
 **Key Technologies:**
-- **Backend:** Python, FastAPI
-- **AI Model:** Ollama (configurable, e.g., `qwen2.5:7b-instruct`)
-- **Memory:** MemLayer service
-- **Dependencies:** `fastapi`, `uvicorn`, `requests`, `pydantic`, `pyyaml`, `tenacity`
+- **Backend:** Python 3.10+, FastAPI
+- **AI Models:** Ollama (`NemoAgent:latest`, `phinance-json:latest`, `qwen2.5:7b-instruct`)
+- **Memory:** MemLayer (Current), MemGraph (Planned)
+- **Dependencies:** `fastapi`, `uvicorn`, `requests`, `pydantic`, `pyyaml`, `tenacity`, `pdfplumber`
 
 **Architecture:**
-The system is composed of three main components:
-1.  **`api.py`:** Exposes a `/ask` endpoint to interact with the agent. It handles HTTP requests and responses.
-2.  **`agent.py`:** Contains the core agent logic. It orchestrates the process of searching memory, querying the model, and storing new memories.
-3.  **`memory.py` & `model.py`:** These are clients for interacting with the external `MemLayer` and `Ollama` services, respectively. They handle the direct communication with these dependencies.
-4.  **`config.yaml`:** A central configuration file to manage all settings, including server ports, model names, and service URLs.
+The system is composed of several key components in `home-ai/soa1/`:
+1.  **`api.py`:** Exposes REST endpoints (`/api/chat`, `/upload-batch`, `/ask`) to interact with the agent.
+2.  **`agent.py`:** The Orchestrator. It handles intent detection, memory retrieval, and specialist invocation.
+3.  **`batch_processor.py`:** Manages the background processing of uploaded financial documents.
+4.  **`models.py`:** Clients for interacting with `Ollama` models.
+5.  **`utils/financial_calculator.py`:** Pure Python math engine for 100% accurate aggregations.
+6.  **`config.yaml`:** Central configuration file.
 
 ---
 
 # Building and Running
 
 ### 1. Prerequisites
-- Python 3.8+
-- An running `Ollama` instance.
+- Python 3.10+
+- A running `Ollama` instance.
 - A running `MemLayer` instance.
 
 ### 2. Installation
