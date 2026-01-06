@@ -192,3 +192,25 @@ home_ai
 llamafarm_clean
 src
 .aider*
+
+# Temporary analysis/debug files (Session 41)
+AIDER_OLLAMA_*.md
+CORE_TEST_ANALYSIS.md
+PROJECT_ANALYSIS_SUMMARY*.md
+TEST_ANALYSIS_*.md
+RemAssist/History.md.backup_*
+RemAssist/merchant_*.md
+*-wrapper.sh
+download_*.sh
+git_file_size_history.sh
+instrumented_e2e.py
+run_e2e_analysis.py
+safe_history_update.py
+setup_*.sh
+soa-webui/debug_*.py
+
+# Temp directories
+fin-benchmark/
+fixes/
+pre_shrink_versions/
+scripts/
