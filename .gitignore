@@ -204,7 +204,6 @@ RemAssist/merchant_*.md
 download_*.sh
 git_file_size_history.sh
 instrumented_e2e.py
-setup_*.sh
 soa-webui/debug_*.py
 
 # Temp directories
