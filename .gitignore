@@ -204,8 +204,6 @@ RemAssist/merchant_*.md
 download_*.sh
 git_file_size_history.sh
 instrumented_e2e.py
-run_e2e_analysis.py
-safe_history_update.py
 setup_*.sh
 soa-webui/debug_*.py
 
@@ -213,4 +211,3 @@ soa-webui/debug_*.py
 fin-benchmark/
 fixes/
 pre_shrink_versions/
-scripts/

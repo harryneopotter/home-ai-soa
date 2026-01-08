@@ -1,7 +1,7 @@
 # 📋 RemAssist — Unified Task Queue
 *Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-_Last updated: January 6, 2026 (Session 41 - Stability Fixes + Phinance Context Window)_
+_Last updated: January 6, 2026 (Session 41 - S1/S2/S5 Complete, Phinance Context Window)_
 
 ---
 
@@ -46,22 +46,25 @@ _Last updated: January 6, 2026 (Session 41 - Stability Fixes + Phinance Context 
 **Fix Applied**: Added `chat_storage.save_batch_phinance_analysis(state.batch_id, analysis)` call in `_run_hybrid_analysis()` after setting `state.phinance_analysis`.
 **Files**: `home-ai/soa1/agent.py` (line ~365)
 
-### 0.0 Implement NemoAgent Critic Pass
+### 0.0 Implement NemoAgent Critic Pass ✅ COMPLETE (Session 41)
 **Source**: Session 34 architecture discussion
 **Purpose**: Validate Phinance output against source data before returning to user
-**Status**: `llm_critic.py` created, basic integration added to `agent.py`
-**Remaining**: Wire into production pipeline, add retry logic on validation failure
+**Status**: Fully wired with retry logic
+
+**Implementation**:
+- `llm_critic.py`: `critic_and_retry()` validates output, retries Phinance with feedback on failure
+- `agent.py`: Both `_run_hybrid_analysis()` and `_process_with_batch_state()` use `critic_and_retry(max_retries=1)`
+- Internal QA only - issues auto-fixed, not surfaced to user
+- Commit: `ccebe88`
 
 **Architecture** (2× 3060 12GB):
-- GPU 0: NemoAgent (13GB) - always warm, orchestrator
+- GPU 0: NemoAgent (13GB) - always warm, orchestrator + critic
 - GPU 1: Phinance-JSON (4GB) - generator
 
 **Pipeline**:
 ```
-Phinance (generate) → NemoAgent (validate) → if fail → retry/escalate to qwen
+Phinance (generate) → NemoAgent (validate) → if fail → Phinance retry with feedback → final output
 ```
-
-**Files**: `utils/llm_critic.py`, `agent.py`
 
 ### 0.1 PDF Date Range Bug ✅ RESOLVED (Session 38)
 **Problem**: PDF export showed "11/23/2025 to 12/31/2024" - dates were backwards
@@ -127,8 +130,8 @@ Phinance (generate) → NemoAgent (validate) → if fail → retry/escalate to q
 
 ## 🔧 Stability & Architecture Tasks (from MASTER_ISSUES_AND_FIXES.md)
 
-### S1. Analysis Persistence Hardening [PRIORITY: HIGH]
-**Status**: Partially fixed in Session 38, needs rowcount hardening
+### S1. Analysis Persistence Hardening [PRIORITY: HIGH] ✅ COMPLETE (Session 41)
+**Status**: Implemented rowcount check + INSERT fallback
 **Problem**: `save_batch_phinance_analysis` UPDATE fails silently if batch record missing
 **Impact**: Data loss - analysis results disappear
 
@@ -136,18 +139,18 @@ Phinance (generate) → NemoAgent (validate) → if fail → retry/escalate to q
 - File: `home-ai/finance_agent/src/storage.py`
 - In `save_batch_phinance_analysis()`:
   - Check `cursor.rowcount` after UPDATE
-  - If rowcount == 0, execute INSERT to create record
-- Guardrails: Pure DB layer change, no user-facing impact, no consent flow affected
+  - If rowcount == 0, execute INSERT to create record with `status='analysis_only'`
+- Commit: `979801a`
 
-### S2. WebUI Async HTTP Calls [PRIORITY: HIGH]
+### S2. WebUI Async HTTP Calls [PRIORITY: HIGH] ✅ COMPLETE (Session 41)
 **Problem**: `soa-webui/main.py` uses sync `requests.post` in async handlers
 **Impact**: Large uploads freeze UI for all users (blocks event loop)
 
 **Implementation**:
 - File: `soa-webui/main.py`
-- Replace `requests.post` with `httpx.AsyncClient` or `aiohttp`
-- Endpoints affected: `/api/proxy/upload`, `/api/proxy/upload-batch`
-- Guardrails: Implementation detail only, API contract unchanged, no consent flow affected
+- Replaced all `requests.post/get` with `httpx.AsyncClient`
+- Endpoints converted: `/api/chat`, `/api/chat/stream`, `/api/proxy/upload`, `/api/proxy/upload-batch`, `/api/proxy/output`, `/api/batch/status`
+- Commit: `979801a`
 
 ### S3. Zombie Task Auto-Timeout [PRIORITY: HIGH] ✅ COMPLETE (Session 41)
 **Problem**: Background tasks can hang, leaving status as "parsing" forever
@@ -170,15 +173,14 @@ Phinance (generate) → NemoAgent (validate) → if fail → retry/escalate to q
 - If > 300 attempts (10 min at 2s intervals) → stop polling, show timeout message
 - Guardrails: Client-side only, no backend changes
 
-### S5. Double-Submission Prevention [PRIORITY: MEDIUM]
+### S5. Double-Submission Prevention [PRIORITY: MEDIUM] ✅ COMPLETE (Session 41)
 **Problem**: User can click "Process" or send messages multiple times while backend is thinking
 **Impact**: Race conditions, duplicate processing
 
 **Implementation**:
 - File: `soa-webui/templates/index.html`
-- Disable input/buttons on submission
-- Re-enable only on response or error
-- Guardrails: Client-side only, standard UX pattern
+- Already implemented: `btn.disabled = true` on submit, re-enabled on response/error
+- CSS styling for disabled state at line 81
 
 ### S6. Brittle Dynamic Imports [PRIORITY: LOW]
 **Problem**: `agent.py` imports storage inside methods, masking errors
