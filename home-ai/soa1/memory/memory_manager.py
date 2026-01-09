@@ -84,7 +84,13 @@ class MemoryManager:
         """
         Agent proposes a memory write. Does NOT persist immediately.
         Kernel must call commit_write() to actually store.
+
+        Raises ValueError for BOOT_CONTEXT (read-only, not writable).
         """
+        if memory_type == MemoryType.BOOT_CONTEXT:
+            logger.error("BOOT_CONTEXT is read-only, cannot propose writes")
+            raise ValueError("BOOT_CONTEXT is read-only and cannot be written")
+
         proposal = MemoryProposal(
             memory_type=memory_type,
             key=key,

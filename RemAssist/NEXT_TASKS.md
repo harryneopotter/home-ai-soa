@@ -170,23 +170,25 @@ Phinance (generate) → NemoAgent (validate) → if fail → Phinance retry with
 - [ ] Full test suite (registration, invocation, consent, rollback)
 - [ ] Update AGENTS.md and documentation
 
-### M2. Memory v0 Implementation [PRIORITY: HIGH]
+### M2. Memory v0 Implementation ✅ COMPLETE (Session 42)
 **Source**: `soa_kernel_alignment_memory_consent_and_agent_awareness.md` Section 2
 **Goal**: Implement minimal, safe memory system before full graph memory
+**Commit**: `8d3dc7c`
 
 #### Three Memory Concepts (Do Not Mix)
 1. **Boot Context** - System identity, role, consent rules (injected via prompts)
 2. **Session Memory** - Current task, batch_id, pipeline stage, running summary (ephemeral)
 3. **User Profile Memory** - Preferences, stable facts, confirmed rules (durable, typed)
 
-#### Tasks
-- [ ] Create `soa1/memory/memory_manager.py` - Wrapper around existing MemoryClient
-- [ ] Implement `memory.propose_write()` - Agent proposes, kernel commits
-- [ ] Implement `memory.commit_write()` - Kernel-only, auditable
-- [ ] Implement `memory.query()` - Scoped, filtered by memory type
-- [ ] Separate Boot Context from Session Memory from User Profile
-- [ ] Add memory type field to MemLayer writes
-- [ ] Unit tests for memory isolation
+#### Implementation
+- [x] Created `soa1/memory/` package with `__init__.py`, `client.py`, `memory_manager.py`, `session_memory.py`
+- [x] `propose_write()` - Agent proposes, kernel commits (uncommitted not visible)
+- [x] `commit_write()` / `reject_write()` - Kernel-only, auditable
+- [x] `query()` - Scoped by memory type, respects commit state
+- [x] Three memory types: `BOOT_CONTEXT` (readonly), `SESSION` (ephemeral), `USER_PROFILE` (durable)
+- [x] `SessionMemory` dataclass for ephemeral session state
+- [x] Integrated into `agent.py` with `MemoryManager` and session helpers
+- [x] 11 unit tests passing (`tests/test_memory.py`)
 
 ### 3. Memory Architecture Upgrade (MAJOR FEATURE) - DEFERRED
 **Status**: Blocked until M2 (Memory v0) is stable

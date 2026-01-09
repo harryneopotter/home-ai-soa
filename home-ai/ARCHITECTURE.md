@@ -1,7 +1,7 @@
 # 🏗️ SOA1 Home Assistant - System Architecture
 
-**Version**: 1.2  
-**Last Updated**: January 6, 2026 (Session 41)  
+**Version**: 1.3  
+**Last Updated**: January 9, 2026 (Session 42)  
 **Hardware**: Intel X670 + 2x NVIDIA RTX 5060 Ti (16GB each, 32GB total VRAM)
 
 ---
@@ -308,6 +308,42 @@ User uploads PDF → NemoAgent reads structure → Offers finance analysis
 
 > **The assistant MUST NOT initiate any specialist action unless the user has explicitly requested or confirmed it.**
 
+### Capability-Based Consent (M0 - Session 42)
+
+Six capabilities with implicit/explicit rules:
+
+| Capability | Consent Required | Description |
+|------------|------------------|-------------|
+| `READ_UPLOADS` | Implicit on upload | Read uploaded files |
+| `ANALYZE_DETERMINISTIC` | Implicit on upload | Python-based calculations |
+| `WRITE_PERSISTENT` | Explicit | Save to database |
+| `CREATE_RULES` | Explicit | Create automated rules |
+| `DEVICE_CONTROL` | Explicit | Control home devices |
+| `EXTERNAL_API` | Explicit | Call external services |
+
+### CONTROL Header System (M0 - Session 42)
+
+Structured control blocks replace prose instructions:
+
+```
+[CONTROL]
+stage: READY
+capabilities: READ_UPLOADS, ANALYZE_DETERMINISTIC
+allowed_actions: invoke_specialist, query_user
+forbidden_actions: write_db, create_rule
+expected_next: invoke_specialist OR query_user
+[/CONTROL]
+```
+
+**Pipeline Stages**: `UPLOADING`, `PDF_PARSE`, `NORMALIZE`, `AGGREGATE`, `READY`, `ANALYZING`, `COMPLETE`, `FAILED`
+
+**Critical Invariant**: `invoke_specialist` ONLY allowed when `stage=READY`
+
+**Enforcement**: `ControlHeaderEnforcer` class in `orchestrator.py`
+- `assert_can_invoke_specialist()` → hard fail if stage != READY
+- `assert_can_write_db()` → hard fail + audit log if write_db forbidden
+- Audit log: `logs/control_violations.jsonl`
+
 ### What Requires Consent
 
 - Financial analysis
@@ -472,25 +508,49 @@ Reference: `/home/ryzen/projects/RemAssist/IMPLEMENTATION_GUIDE.md`
 
 Long-term episodic memory for user context across sessions.
 
-### Architecture
+### Architecture (Memory v0 - Session 42)
+
+**Three Memory Types** (Do Not Mix):
+1. **BOOT_CONTEXT** - Read-only, injected via prompts (identity, role, consent rules)
+2. **SESSION** - Ephemeral, in-memory dict (batch_id, pipeline stage, running summary)
+3. **USER_PROFILE** - Durable, requires backend (preferences, confirmed rules)
+
+**Key Pattern: Propose/Commit**
+- Agents call `propose_write(key, value, memory_type, reason)` - creates pending proposal
+- Kernel calls `commit_write(key)` or `reject_write(key, reason)` - finalizes or discards
+- Uncommitted proposals NOT visible via `query()` - prevents agent self-reinforcement
+- Full audit log of all proposals and decisions
 
 **Backend**: MemLayer (separate service on port 8000)
 - Vector database for semantic search
 - Metadata storage (timestamps, event types)
 - User/profile isolation
 
-**Integration**: `home-ai/soa1/memory.py`
+**Implementation**: `home-ai/soa1/memory/` package
 ```python
-class MemoryClient:
-    def search_memory(query: str) -> List[Dict]:
-        # Search relevant past memories
-        
-    def write_memory(text: str, metadata: Dict):
-        # Store new factual memory
-        
-    def health_check() -> bool:
-        # Verify service availability
+# memory/__init__.py exports:
+from memory.client import MemoryClient
+from memory.memory_manager import MemoryManager, MemoryType
+from memory.session_memory import SessionMemory
+
+# In agent.py:
+class SOA1Agent:
+    def __init__(self):
+        backend = self.memory if self._memory_available else None
+        self.memory_manager = MemoryManager(backend=backend)
+        self._sessions: dict[str, SessionMemory] = {}
+    
+    def get_session(self, session_id: str) -> SessionMemory
+    def clear_session(self, session_id: str) -> None
 ```
+
+### Memory Package Files
+| File | Purpose |
+|------|---------|
+| `memory/__init__.py` | Package exports |
+| `memory/client.py` | MemoryClient for MemLayer backend |
+| `memory/memory_manager.py` | Propose/commit pattern, typed memory |
+| `memory/session_memory.py` | Ephemeral session state dataclass |
 
 ### Memory Format
 
@@ -669,9 +729,11 @@ def analyze_medical_document(doc: MedicalDocument) -> MedicalInsight:
 - **Local-First**: Privacy-focused, no cloud dependencies
 - **Resource-Aware**: Intelligent GPU allocation, 32GB VRAM total
 
-**Current Status** (January 1, 2026):
+**Current Status** (January 9, 2026):
 - ✅ Finance specialist operational (phinance-json)
-- ✅ Consent framework implemented
+- ✅ Consent framework implemented with capability-based model (M0)
+- ✅ CONTROL header system with pipeline stages (M0)
+- ✅ Memory v0 with propose/commit pattern (M2)
 - ✅ PDF parsing pipeline working
 - ✅ SSE event streaming for analysis progress
 - ✅ Per-step timing instrumentation
@@ -682,13 +744,13 @@ def analyze_medical_document(doc: MedicalDocument) -> MedicalInsight:
 - ✅ LLM-driven responses (all user-facing text from agent)
 - ✅ Chat history persistence with multi-turn context
 - ✅ Cross-document comparison and merchant normalization
+- ✅ NemoAgent Critic Pass for output validation
+- ⏳ M1: Modular Orchestrator (next major task)
 - ⏳ Other specialists planned but not implemented
 
 **Next Steps**:
-1. **Security Layer**: PII redaction + encrypted storage (see `RemAssist/PROGRESSIVE_BATCH_ARCHITECTURE.md`)
-2. **Batch Processing**: Progressive 5-phase pipeline for multi-PDF uploads
-3. **Output Pre-generation**: Dashboard, PDF, infographic prompts ready before user asks
-4. Implement remaining specialists (budgeting, knowledge, scheduler)
+1. **M1: Modular Orchestrator** - Generic `[INVOKE:X]` router, specialist registry
+2. Implement remaining specialists (budgeting, knowledge, scheduler)
 - **Hardware Specs**: `/home/ryzen/projects/RemAssist/HARDWARE_SPECS.md` (MUST CHECK for GPU decisions)
 
 ---

@@ -1,7 +1,7 @@
 # SOA1 Project State - January 2026
 
-**Version**: 2.4  
-**Last Updated**: January 4, 2026 (Session 32)  
+**Version**: 2.5  
+**Last Updated**: January 9, 2026 (Session 42)  
 **Hardware**: Intel X670 + 2x NVIDIA RTX 5060 Ti (16GB each, 32GB total VRAM)
 
 > ⚠️ **For batch/upload work**: See `RemAssist/BATCH_FLOW.md` for the 5-phase progressive pipeline.
@@ -181,8 +181,12 @@ Results available in consolidated dashboard
 | `home-ai/soa1/agent.py` | SOA1Agent class, query handling, [INVOKE:phinance] detection |
 | `home-ai/soa1/model.py` | ModelClient for Ollama calls |
 | `home-ai/soa1/models.py` | Phinance model calls with validation |
-| `home-ai/soa1/orchestrator.py` | Consent state management |
-| `home-ai/soa1/memory.py` | MemLayer client |
+| `home-ai/soa1/orchestrator.py` | Consent state management, Capability enum, ControlHeaderEnforcer |
+| `home-ai/soa1/control_header.py` | CONTROL header system (M0) - stages, data kinds, actions |
+| `home-ai/soa1/memory/` | Memory v0 package (M2) |
+| `home-ai/soa1/memory/client.py` | MemLayer client |
+| `home-ai/soa1/memory/memory_manager.py` | Propose/commit pattern, typed memory |
+| `home-ai/soa1/memory/session_memory.py` | Ephemeral session state |
 | `home-ai/soa1/prompts/orchestrator.md` | System prompt (model-agnostic) |
 | `home-ai/soa1/config.yaml` | Model and service configuration |
 
@@ -409,44 +413,48 @@ tail -f /home/ryzen/projects/soa-webui/logs/soa-webui.log
 
 ---
 
-## Current Status (January 4, 2026)
+## Current Status (January 9, 2026)
 
 ### ✅ Working
 - PDF upload and document tracking
 - Chat interface with progressive engagement
-- Consent-gated analysis flow
+- Consent-gated analysis flow with capability-based model (M0)
+- CONTROL header system with pipeline stages (M0)
+- Memory v0 with propose/commit pattern (M2)
 - [INVOKE:phinance] tag detection and routing
 - Transaction extraction pipeline
 - Consolidated finance dashboard
 - **PDF Export** - WeasyPrint generates A4 reports from `/export/pdf/{batch_id}`
 - **Merchant Stable IDs** - sha256 hash for graph-safe linkage (survives dictionary updates)
+- **NemoAgent Critic Pass** - validates Phinance output, retries on failure
 - LLM response validation with retry
 - Chat history persistence
 - Cross-document comparison
 - Merchant normalization (40+ patterns, versioned dictionary)
 - Security hardening (XSS, path traversal)
 - Progressive single-file upload (`/upload-pdf` returns in ~30ms)
+- Async HTTP in WebUI (httpx.AsyncClient)
+- Zombie task auto-timeout (10 min)
+- Frontend polling timeout (300 attempts)
 
 ### ⚠️ Known Issues
-- **CRITICAL**: `GET /api/batch/status/{batch_id}` endpoint missing in SOA1
-  - WebUI batch upload shows "Processing in background" forever
-  - See `RemAssist/BATCH_FLOW.md` for required fix
 - MemLayer connection may fail (graceful degradation in place)
 
-### 🔜 Planned
-- Budgeting specialist
-- Knowledge specialist  
-- Scheduler specialist
-- Voice interface (TTS)
-- Mobile companion app
+### 🔜 Planned (M1: Modular Orchestrator)
+- Phase 1: `specialist/base.py`, `registry.py`, `consent_manager.py`
+- Phase 2: Generic `[INVOKE:X]` router
+- Phase 3: Dynamic prompt injection
+- Phase 4: Remove hardcoded finance paths
+- Then: Budgeting, Knowledge, Scheduler specialists
 
 ---
 
 ## Related Documentation
 
-- `RemAssist/BATCH_FLOW.md` - **Batch upload 5-phase pipeline (READ FIRST for upload work)**
-- `RemAssist/IMPLEMENTATION_GUIDE.md` - Core invariants, consent rules
+- `RemAssist/PROGRESSIVE_FLOW.md` - **Batch upload 4-phase pipeline (READ FIRST for upload work)** ⭐ CANONICAL
+- `RemAssist/IMPLEMENTATION_GUIDE.md` - Core invariants, consent rules, CONTROL header enforcement
 - `RemAssist/LLM_DRIVEN_RESPONSES.md` - All user-facing text from LLM
+- `RemAssist/MODULAR_ORCHESTRATOR_PLAN.md` - M1 implementation plan
 - `RemAssist/History.md` - Session history, changes made
 - `RemAssist/NEXT_TASKS.md` - Task queue
 - `RemAssist/errors.md` - Error tracking log
@@ -454,6 +462,18 @@ tail -f /home/ryzen/projects/soa-webui/logs/soa-webui.log
 - `RemAssist/PROGRESSIVE_BATCH_ARCHITECTURE.md` - Full technical spec with security layer
 - `home-ai/ARCHITECTURE.md` - Detailed system architecture
 - `AGENTS.md` - AI agent guidelines
+
+---
+
+## Recent Milestones
+
+| Milestone | Session | Commit | Description |
+|-----------|---------|--------|-------------|
+| M0: CONTROL Headers | 42 | `f552601` | Capability-based consent, CONTROL blocks, ControlHeaderEnforcer |
+| M2: Memory v0 | 42 | `8d3dc7c` | Typed memory with propose/commit pattern, session management |
+| NemoAgent Critic | 41 | `ccebe88` | Validates Phinance output, auto-retry on failure |
+| Phinance Context | 41 | `929f08c` | Optimized 32K → 4K tokens |
+| Stability Fixes | 41 | `979801a` | S1 persistence, S2 async HTTP |
 
 ---
 

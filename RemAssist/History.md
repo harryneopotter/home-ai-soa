@@ -1,3 +1,63 @@
+### January 9, 2026 - M2 Memory v0 Complete (Session 42 Continued)
+
+#### Goal
+Complete M2 (Memory v0) implementation — typed, auditable memory system with propose/commit pattern.
+
+#### M2 Implementation ✅
+Created `soa1/memory/` package with:
+- `__init__.py` - Package exports (MemoryClient, MemoryManager, SessionMemory)
+- `client.py` - Moved from `memory.py` (MemoryClient for MemLayer backend)
+- `memory_manager.py` - Kernel-controlled memory with propose/commit pattern
+- `session_memory.py` - Ephemeral session state dataclass
+
+#### Three Memory Types (Do Not Mix)
+1. **BOOT_CONTEXT** - Read-only, injected via prompts (identity, role, consent rules)
+2. **SESSION** - Ephemeral, stored in-memory dict (batch_id, pipeline stage, running summary)
+3. **USER_PROFILE** - Durable, requires backend (preferences, confirmed rules)
+
+#### Key Pattern: Propose/Commit
+- Agents call `propose_write(key, value, memory_type, reason)` - creates pending proposal
+- Kernel calls `commit_write(key)` or `reject_write(key, reason)` - finalizes or discards
+- Uncommitted proposals NOT visible via `query()` - prevents agent self-reinforcement
+- Full audit log of all proposals and decisions
+
+#### Integration in agent.py
+```python
+from memory import MemoryClient
+from memory.memory_manager import MemoryManager, MemoryType
+from memory.session_memory import SessionMemory
+
+# In __init__:
+backend = self.memory if self._memory_available else None
+self.memory_manager = MemoryManager(backend=backend)
+self._sessions: dict[str, SessionMemory] = {}
+
+# New methods:
+def get_session(self, session_id: str) -> SessionMemory
+def clear_session(self, session_id: str) -> None
+```
+
+#### Files Created
+- `home-ai/soa1/memory/__init__.py`
+- `home-ai/soa1/memory/client.py` (moved from `memory.py`)
+- `home-ai/soa1/memory/memory_manager.py`
+- `home-ai/soa1/memory/session_memory.py`
+- `home-ai/soa1/tests/test_memory.py` (11 unit tests)
+
+#### Files Modified
+- `home-ai/soa1/agent.py` - Import new memory module, add MemoryManager + session helpers
+- `RemAssist/NEXT_TASKS.md` - Marked M2 complete
+
+#### Test Results
+- 11/11 tests passing for memory isolation
+- SOA1 service starts successfully
+- Upload flow verified at ~15s latency
+
+#### Commit
+- `8d3dc7c` feat(M2): implement Memory v0 with typed propose/commit pattern
+
+---
+
 ### January 8, 2026 - M0 Implementation Complete (Session 42)
 
 #### Goal

@@ -21,9 +21,11 @@ def test_session_memory_does_not_persist_to_backend():
 
 def test_boot_context_is_readonly():
     mm = MemoryManager(backend=None)
-    proposal = mm.propose_write(MemoryType.BOOT_CONTEXT, "system_role", "test")
-    success = mm.commit_write(proposal)
-    assert success is False, "BOOT_CONTEXT should be readonly"
+    try:
+        mm.propose_write(MemoryType.BOOT_CONTEXT, "system_role", "test")
+        assert False, "BOOT_CONTEXT propose_write should raise ValueError"
+    except ValueError as e:
+        assert "read-only" in str(e)
     print("PASS: test_boot_context_is_readonly")
 
 

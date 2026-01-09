@@ -1,6 +1,6 @@
 # 📋 Services Configuration
 
-_Last updated: January 6, 2026 (Session 41)_
+_Last updated: January 9, 2026 (Session 42)_
 
 ## 🏁 Overview
 This document provides a comprehensive reference for all SOA1 services, their configurations, ports, and purposes.
@@ -191,6 +191,19 @@ Create `/etc/logrotate.d/soa1`:
 - WebUI/API logs: ~500KB-2MB per day
 - Finance DB: Grows with transactions, ~1MB per 1000 transactions
 - **Recommended minimum free space**: 10GB on `/home` partition
+
+## 🗂️ Key Files Modified (Jan 9, 2026)
+
+| File | Changes |
+|------|---------|
+| `home-ai/soa1/memory/__init__.py` | **NEW** - Package exports |
+| `home-ai/soa1/memory/client.py` | **MOVED** - Was `memory.py` |
+| `home-ai/soa1/memory/memory_manager.py` | **NEW** - Propose/commit pattern |
+| `home-ai/soa1/memory/session_memory.py` | **NEW** - Ephemeral session state |
+| `home-ai/soa1/tests/test_memory.py` | **NEW** - 11 unit tests |
+| `home-ai/soa1/agent.py` | Integrated MemoryManager + session helpers |
+| `home-ai/soa1/control_header.py` | **NEW** - CONTROL header system (M0) |
+| `home-ai/soa1/orchestrator.py` | Added Capability enum, ControlHeaderEnforcer |
 
 ## 🗂️ Key Files Modified (Dec 31, 2025)
 
