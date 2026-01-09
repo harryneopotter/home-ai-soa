@@ -105,4 +105,5 @@ Log errors to `RemAssist/errors.md`:
 - Do NOT invent new intents
 - Do NOT auto-trigger specialists
 - Do NOT optimize away consent
+- Do NOT relax enforcement for "UX smoothness"
 - **MUST check `HARDWARE_SPECS.md`** before adding models/GPU features

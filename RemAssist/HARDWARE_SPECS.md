@@ -117,6 +117,30 @@ Total free: ~10 GB across both GPUs
 
 ## 🤖 Ollama Configuration
 
+### KV Cache Quantization ✅ ENABLED
+
+| Setting | Value | Location |
+|---------|-------|----------|
+| **`OLLAMA_KV_CACHE_TYPE`** | **`q8_0`** | `/etc/systemd/system/ollama.service` |
+
+**Why q8_0:**
+- ~30-40% VRAM savings on KV cache
+- Minimal quality degradation (barely measurable)
+- Allows larger context windows or more concurrent models
+
+**Options available:**
+| Value | VRAM Savings | Quality |
+|-------|--------------|---------|
+| `f16` | None (default) | Best |
+| `q8_0` | ~30-40% | Excellent (current) |
+| `q4_0` | ~50-60% | Good (more aggressive) |
+
+**To change:** Edit `/etc/systemd/system/ollama.service`, then:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
 ### Available Models (as of Jan 2, 2026)
 
 | Model | Size | Purpose | Status |
@@ -146,6 +170,18 @@ Total free: ~10 GB across both GPUs
 ### Ollama Endpoints
 - **API**: `http://localhost:11434`
 - **Health**: `http://localhost:11434/api/tags`
+- **Models Path**: `/mnt/models/ollama` (custom path via `OLLAMA_MODELS`)
+
+### Ollama Service File
+Location: `/etc/systemd/system/ollama.service`
+```ini
+[Service]
+ExecStart=/usr/local/bin/ollama serve
+User=ollama
+Group=ollama
+Environment="OLLAMA_MODELS=/mnt/models/ollama"
+Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
+```
 
 ---
 
@@ -211,4 +247,4 @@ df -h /
 
 ---
 
-*Last updated: January 2, 2026*
+*Last updated: January 8, 2026*

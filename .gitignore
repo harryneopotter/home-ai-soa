@@ -210,3 +210,6 @@ soa-webui/debug_*.py
 fin-benchmark/
 fixes/
 pre_shrink_versions/
+
+# Local WIP scratch
+.wip/

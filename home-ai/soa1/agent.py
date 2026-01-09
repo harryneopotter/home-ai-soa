@@ -23,6 +23,14 @@ from utils.financial_calculator import (
     merge_calculated_with_llm_response,
     strip_markdown_fences,
 )
+from control_header import (
+    ControlHeaderContext,
+    PipelineStage,
+    build_control_header,
+    status_to_stage,
+    data_kind_for_stage,
+)
+from orchestrator import Capability, IMPLICIT_UPLOAD_CAPABILITIES
 
 logger = get_logger("agent")
 
@@ -90,10 +98,14 @@ class SOA1Agent:
         self.tts_output_dir = tts_config.get("output_dir", "/tmp/soa1_tts")
 
         # Optional: test memory connectivity on startup
+        self._memory_available = False
         try:
             self.memory.health_check()
+            self._memory_available = True
         except Exception as e:
-            logger.warning(f"MemLayer health check failed at init: {e}")
+            logger.warning(
+                f"MemLayer health check failed at init (memory disabled): {e}"
+            )
 
         # Optional: test TTS availability
         if self.tts_enabled:
@@ -133,52 +145,56 @@ class SOA1Agent:
 
     # Format Document Context (for progressive engagement)
     def _format_document_context(
-        self, document_context: Optional[Dict[str, Any]]
+        self,
+        document_context: Optional[Dict[str, Any]],
+        session_id: Optional[str] = None,
     ) -> str:
-        """
-        Format document metadata and BATCH STATE into the [DOCUMENT CONTEXT] block.
-        """
         if not document_context or not document_context.get("documents"):
             return ""
 
         batch_id = document_context.get("batch_id")
         docs = document_context["documents"]
-        lines = ["[DOCUMENT CONTEXT]"]
+
+        stage = PipelineStage.UPLOADING
+        transaction_count = 0
+        interesting_findings = []
 
         if batch_id:
-            lines.append(f"Batch ID: {batch_id}")
             state = batch_processor.get_batch_state(batch_id)
             if state:
-                lines.append(f"Processing Status: {state.status}")
+                stage = status_to_stage(state.status)
+                transaction_count = state.transaction_count
+                interesting_findings = state.interesting_findings or []
 
-                # Context & Protocol Injection
-                if state.status in ("uploading", "parsing", "processing"):
-                    lines.append(
-                        "NOTE: This is a QUICK METADATA PREVIEW only. Full text extraction is running in the background."
-                    )
-                    lines.append(
-                        "PRIVACY PROTOCOL: Extracted data is NOT persisted or analyzed until user consent is explicitly given."
-                    )
-                    lines.append(
-                        "GOAL: Use this metadata (filenames/types) to acknowledge receipt and ASK FOR CONSENT to analyze."
-                    )
-                elif state.status == "ready":
-                    lines.append(
-                        "NOTE: Full extraction is COMPLETE. Preliminary findings are loaded in your context."
-                    )
-                    lines.append(
-                        "PRIVACY PROTOCOL: Do NOT reveal these findings yet. You must obtain explicit user consent first."
-                    )
-                    lines.append(
-                        "GOAL: Ask the user if they want you to analyze this data. If they say 'yes', emit [INVOKE:phinance]."
-                    )
+        ctx = ControlHeaderContext(
+            session_id=session_id,
+            batch_id=batch_id,
+            stage=stage,
+            data_kind=data_kind_for_stage(stage),
+            capabilities_granted=IMPLICIT_UPLOAD_CAPABILITIES.copy(),
+            transaction_count=transaction_count,
+            file_count=len(docs),
+            is_partial=(
+                stage
+                in (
+                    PipelineStage.UPLOADING,
+                    PipelineStage.PDF_PARSE,
+                    PipelineStage.NORMALIZE,
+                )
+            ),
+        )
 
-                if state.transaction_count > 0:
-                    lines.append(f"Transactions Found: {state.transaction_count}")
-                if state.interesting_findings:
-                    lines.append("Preliminary Findings:")
-                    for finding in state.interesting_findings:
-                        lines.append(f"  - {finding}")
+        lines = [build_control_header(ctx)]
+
+        lines.append("")
+        lines.append("[DATA]")
+
+        if transaction_count > 0:
+            lines.append(f"Transactions Found: {transaction_count}")
+        if interesting_findings:
+            lines.append("Preliminary Findings:")
+            for finding in interesting_findings:
+                lines.append(f"  - {finding}")
 
         lines.append("Files in this session:")
         for i, doc in enumerate(docs, 1):
@@ -195,7 +211,7 @@ class SOA1Agent:
                 preview = "\\n".join(headers[:3])
                 lines.append(f"  Headers: {preview}")
 
-        lines.append("[/DOCUMENT CONTEXT]")
+        lines.append("[/DATA]")
         return "\n".join(lines)
 
     def _spawn_phinance_background(
@@ -590,12 +606,13 @@ class SOA1Agent:
 
         logger.info(f"SOA1 received query: {query}")
 
-        # 1. Search memory (graceful degradation if unavailable)
+        # 1. Search memory (skip if unavailable at init)
         memories = []
-        try:
-            memories = self.memory.search_memory(query)
-        except Exception as e:
-            logger.warning(f"Memory search failed (continuing without): {e}")
+        if self._memory_available:
+            try:
+                memories = self.memory.search_memory(query)
+            except Exception as e:
+                logger.warning(f"Memory search failed (continuing without): {e}")
 
         memory_context = self._format_memory_context(memories)
 
@@ -715,29 +732,30 @@ class SOA1Agent:
                                 )
 
         # 7. Write new factual memory (with explicit time)
-        try:
-            timestamp = datetime.utcnow()
+        if self._memory_available:
+            try:
+                timestamp = datetime.utcnow()
 
-            summary_text = (
-                f"[Event]\n"
-                f"question: {query}\n"
-                f"answer: {answer}\n"
-                f"recorded_at_utc: {timestamp.isoformat()}\n"
-                f"recorded_at_local: {timestamp.astimezone().isoformat()}\n"
-            )
+                summary_text = (
+                    f"[Event]\n"
+                    f"question: {query}\n"
+                    f"answer: {answer}\n"
+                    f"recorded_at_utc: {timestamp.isoformat()}\n"
+                    f"recorded_at_local: {timestamp.astimezone().isoformat()}\n"
+                )
 
-            self.memory.write_memory(
-                text=summary_text,
-                metadata={
-                    "event_type": "qa_interaction",
-                    "recorded_at_utc": timestamp.isoformat(),
-                    "recorded_epoch": int(timestamp.timestamp()),
-                },
-            )
+                self.memory.write_memory(
+                    text=summary_text,
+                    metadata={
+                        "event_type": "qa_interaction",
+                        "recorded_at_utc": timestamp.isoformat(),
+                        "recorded_epoch": int(timestamp.timestamp()),
+                    },
+                )
 
-        except Exception as e:
-            logger.warning(f"Memory write failed (non-critical): {e}")
-            # Non-critical failure - continue
+            except Exception as e:
+                logger.warning(f"Memory write failed (non-critical): {e}")
+                # Non-critical failure - continue
 
         # 6. Return agent output
         result = {
@@ -787,10 +805,11 @@ class SOA1Agent:
         logger.info(f"SOA1 streaming query: {query}")
 
         memories = []
-        try:
-            memories = self.memory.search_memory(query)
-        except Exception as e:
-            logger.warning(f"Memory search failed (continuing without): {e}")
+        if self._memory_available:
+            try:
+                memories = self.memory.search_memory(query)
+            except Exception as e:
+                logger.warning(f"Memory search failed (continuing without): {e}")
 
         memory_context = self._format_memory_context(memories)
         doc_context_block = self._format_document_context(document_context)

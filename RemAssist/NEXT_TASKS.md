@@ -1,7 +1,7 @@
 # 📋 RemAssist — Unified Task Queue
 *Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-_Last updated: January 6, 2026 (Session 41 - S1/S2/S5 Complete, Phinance Context Window)_
+_Last updated: January 8, 2026 (Session 41 - Kernel Alignment Review Complete)_
 
 ---
 
@@ -109,11 +109,90 @@ Phinance (generate) → NemoAgent (validate) → if fail → Phinance retry with
 - [ ] Register as agent tools for chat-based correction
 - [ ] **Enable `USE_LLM_CATEGORIZATION = True`** after this is complete
 
-### 3. Memory Architecture Upgrade (MAJOR FEATURE)
-- [ ] **Phase 1: Mem0 Setup** (Week 1)
-  - [ ] Install Mem0, configure Kuzu + ChromaDB + Ollama
-  - [ ] Create family entity schema, test extraction
-  - [ ] Integrate with SOA1Agent, replace MemLayer
+### M1. Modular Orchestrator Implementation [PRIORITY: HIGH]
+**Plan Document**: `RemAssist/MODULAR_ORCHESTRATOR_PLAN.md`
+**Alignment Document**: `/projects/soa_kernel_alignment_memory_consent_and_agent_awareness.md`
+**Goal**: Decouple finance logic so adding new specialists requires no orchestrator changes
+**Estimate**: ~39 hours (2 weeks part-time)
+
+#### Phase 0: Pre-requisites (Before M1)
+- [x] **M0.2 Consent Policy Update** - Upload implies READ_UPLOADS consent ✅ COMPLETE (Session 42)
+  - Updated `IMPLEMENTATION_GUIDE.md` with capability-based consent model
+  - Updated `orchestrator.md` prompt to remove consent prompts for read-only analysis
+  - Updated `orchestrator.py` to grant implicit capabilities on upload
+- [x] **M0.3 Expand Capability Enum** - 6 capabilities per alignment doc ✅ COMPLETE (Session 42)
+  - `READ_UPLOADS` (implicit on upload)
+  - `ANALYZE_DETERMINISTIC` (implicit on upload)
+  - `WRITE_PERSISTENT` (explicit consent)
+  - `CREATE_RULES` (explicit consent)
+  - `DEVICE_CONTROL` (explicit consent)
+  - `EXTERNAL_API` (explicit consent)
+- [x] **M0.1 CONTROL Header System** - Replace prose instructions with structured control blocks ✅ COMPLETE (Session 42)
+  - Created `soa1/control_header.py` - Build CONTROL blocks from session/batch/chunk state
+  - Updated `agent.py` to inject CONTROL header before data chunks
+  - Updated `orchestrator.md` with CONTROL header documentation
+  - Stage signals: `UPLOADING`, `PDF_PARSE`, `NORMALIZE`, `AGGREGATE`, `READY`, `ANALYZING`, `COMPLETE`, `FAILED`
+  - **Invariant**: `invoke_specialist` ONLY allowed when `stage=READY`
+  - Added `ControlHeaderEnforcer` class with runtime assertions:
+    - `assert_can_invoke_specialist()` → hard fail if stage != READY or not in allowed_actions
+    - `assert_can_write_db()` → hard fail + audit log if write_db forbidden
+    - `warn_expected_next()` → warning (non-fatal) on violation
+  - Audit log: `logs/control_violations.jsonl`
+  - Updated `IMPLEMENTATION_GUIDE.md` Section 15 with enforcement rules
+  - **Rule**: Do not relax enforcement for "UX smoothness"
+
+#### Phase 1: Foundation (Days 1-3)
+- [ ] Create `soa1/specialist/base.py` - BaseSpecialist ABC, SpecialistContext, SpecialistResult
+- [ ] Create `soa1/specialist/registry.py` - SpecialistRegistry singleton
+- [ ] Create `soa1/specialist/consent_manager.py` - DB-backed consent persistence
+- [ ] Create `soa1/specialists/finance/__init__.py` - FinanceSpecialist wrapping existing logic
+- [ ] Add `consent_records` table to SQLite schema
+- [ ] Unit tests for base classes
+
+#### Phase 2: Router (Days 4-6)
+- [ ] Create `soa1/specialist/router.py` - Generic `[INVOKE:X]` pattern detection
+- [ ] Add `USE_SPECIALIST_ROUTER` feature flag to agent.py
+- [ ] Wire router into `agent.ask()` behind feature flag
+- [ ] Update `orchestrator.py` to use ConsentManager
+- [ ] Integration tests for router + consent flow
+
+#### Phase 3: Dynamic Prompts (Days 7-9)
+- [ ] Create `prompts/fragments/finance.md` - Finance-specific prompt fragment
+- [ ] Modify `orchestrator.md` with `{{SPECIALIST_INSTRUCTIONS}}` placeholder
+- [ ] Update `_load_system_prompt()` with injection logic
+- [ ] Remove hardcoded finance keywords from `_infer_intent()`
+- [ ] E2E tests with dynamic prompts
+
+#### Phase 4: Cleanup (Days 10-12)
+- [ ] Remove old `_invoke_phinance()` code path from agent.py
+- [ ] Remove `INVOKE_PATTERN` hardcoded regex
+- [ ] Remove feature flag, make router default
+- [ ] Full test suite (registration, invocation, consent, rollback)
+- [ ] Update AGENTS.md and documentation
+
+### M2. Memory v0 Implementation [PRIORITY: HIGH]
+**Source**: `soa_kernel_alignment_memory_consent_and_agent_awareness.md` Section 2
+**Goal**: Implement minimal, safe memory system before full graph memory
+
+#### Three Memory Concepts (Do Not Mix)
+1. **Boot Context** - System identity, role, consent rules (injected via prompts)
+2. **Session Memory** - Current task, batch_id, pipeline stage, running summary (ephemeral)
+3. **User Profile Memory** - Preferences, stable facts, confirmed rules (durable, typed)
+
+#### Tasks
+- [ ] Create `soa1/memory/memory_manager.py` - Wrapper around existing MemoryClient
+- [ ] Implement `memory.propose_write()` - Agent proposes, kernel commits
+- [ ] Implement `memory.commit_write()` - Kernel-only, auditable
+- [ ] Implement `memory.query()` - Scoped, filtered by memory type
+- [ ] Separate Boot Context from Session Memory from User Profile
+- [ ] Add memory type field to MemLayer writes
+- [ ] Unit tests for memory isolation
+
+### 3. Memory Architecture Upgrade (MAJOR FEATURE) - DEFERRED
+**Status**: Blocked until M2 (Memory v0) is stable
+- [ ] ~~Phase 1: Mem0 Setup~~ - Deferred per alignment doc
+- [ ] ~~Graph memory~~ - Deferred
+- [ ] ~~Preference learning~~ - Deferred
 
 ---
 

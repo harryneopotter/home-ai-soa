@@ -1,3 +1,126 @@
+### January 8, 2026 - M0 Implementation Complete (Session 42)
+
+#### Goal
+Implement Modular Orchestrator Pre-requisites (M0) — capability-based consent and CONTROL header system.
+
+#### M0.2: Consent Policy Update ✅
+- Updated `IMPLEMENTATION_GUIDE.md` with capability-based consent model (6 capabilities)
+- Upload now grants `READ_UPLOADS` and `ANALYZE_DETERMINISTIC` implicitly
+- No consent prompts for read-only analysis
+- Updated `orchestrator.py` with `Capability` enum and implicit grant on upload
+
+#### M0.3: Capability Enum ✅
+Implemented 6 capabilities in `orchestrator.py`:
+- `READ_UPLOADS` (implicit on upload)
+- `ANALYZE_DETERMINISTIC` (implicit on upload)
+- `WRITE_PERSISTENT` (explicit consent required)
+- `CREATE_RULES` (explicit consent required)
+- `DEVICE_CONTROL` (explicit consent required)
+- `EXTERNAL_API` (explicit consent required)
+
+#### M0.1: CONTROL Header System ✅
+Created `soa1/control_header.py` with:
+- `PipelineStage` enum: UPLOADING, PDF_PARSE, NORMALIZE, AGGREGATE, READY, ANALYZING, COMPLETE, FAILED
+- `DataKind`, `AllowedAction`, `ForbiddenAction`, `ExpectedNext` enums
+- `ControlHeaderContext` dataclass
+- `build_control_header()` function generating structured blocks
+- `status_to_stage()` and `data_kind_for_stage()` helpers
+
+Updated `agent.py`:
+- `_format_document_context()` now generates CONTROL + DATA blocks instead of prose
+
+Updated `orchestrator.md`:
+- Documented CONTROL header format and stage behavior rules
+- Added "Reading the CONTROL Block" instructions
+
+#### CONTROL Header Enforcement ✅
+Added `ControlHeaderEnforcer` class in `orchestrator.py`:
+- `assert_can_invoke_specialist()` → hard fail if stage != READY or not in allowed_actions
+- `assert_can_write_db()` → hard fail + audit log if write_db forbidden
+- `warn_expected_next()` → warning (non-fatal) on violation
+
+**Critical Invariant**: `invoke_specialist` ONLY allowed when `stage=READY`
+- Enforced in `STAGE_ALLOWED_ACTIONS` mapping
+- Runtime assertion in `build_control_header()`
+- Documented in `orchestrator.md`
+
+Audit logging to `logs/control_violations.jsonl` with:
+- timestamp, stage, action, reason, fatal flag
+- allowed_actions and forbidden_actions snapshot
+
+#### Documentation Updates
+- `IMPLEMENTATION_GUIDE.md` Section 15.1-15.2: CONTROL header enforcement + "No UX Exceptions" rule
+- `AGENTS.md`: Added "Do NOT relax enforcement for UX smoothness" to Hard Rules
+- `NEXT_TASKS.md`: Marked M0.1, M0.2, M0.3 complete with full details
+
+#### Files Created
+- `home-ai/soa1/control_header.py` (~230 lines)
+
+#### Files Modified
+- `home-ai/soa1/orchestrator.py` - Capability enum, ControlHeaderEnforcer
+- `home-ai/soa1/agent.py` - CONTROL header integration
+- `home-ai/soa1/prompts/orchestrator.md` - CONTROL header docs
+- `RemAssist/IMPLEMENTATION_GUIDE.md` - Enforcement rules
+- `RemAssist/NEXT_TASKS.md` - M0 tasks marked complete
+- `AGENTS.md` - Added enforcement rule
+
+#### Tests Performed
+- CONTROL header generation verified
+- `invoke_specialist` invariant verified across all stages
+- `ControlHeaderEnforcer` assertions tested (4 test cases)
+- Audit log entries verified
+
+---
+
+### January 8, 2026 - Modular Orchestrator Planning (Session 41 Continuation)
+
+#### Goal
+Design a modular orchestrator architecture so adding new domain specialists (health, scheduling, home automation) requires minimal/zero code changes to the core orchestrator.
+
+#### Research Completed
+- **Explore Agent**: Inventoried all orchestrator-related files and finance couplings
+- **Librarian Agent**: Researched LangChain, Semantic Kernel, OpenAI function calling, Auto-GPT patterns
+
+#### Design Pinning Questions Resolved
+Answered 6 critical design questions to lock architectural decisions:
+
+| Question | Answer |
+|----------|--------|
+| 1. Entry point | `SOA1Agent.ask()` in `agent.py` - **LOCKED** |
+| 2. memory.py | Live, trusted, wrap don't replace - **LOCKED** |
+| 3. Consent source of truth | New `ConsentManager` (DB-backed) - **DECIDED** |
+| 4. Session boundary | `X-Session-ID` header (or IP fallback) - **LOCKED** |
+| 5. Specialists vs helpers | Only phinance is real; others are stubs - **LOCKED** |
+| 6. Implicit memory | OK via chat_history (20 turns), no hidden state - **AGREED** |
+
+#### Ollama KV Cache Quantization
+Confirmed `OLLAMA_KV_CACHE_TYPE=q8_0` already configured in systemd service.
+- ~30-40% VRAM savings on KV cache
+- Updated HARDWARE_SPECS.md with documentation
+
+#### SOA Kernel Alignment Review
+Reviewed `/projects/soa_kernel_alignment_memory_consent_and_agent_awareness.md` for alignment:
+
+**Aligned:**
+- Single user-facing agent (Chat Agent)
+- Kernel as router + state machine
+- Capability-based consent model
+- Memory v0 interface design
+- Deferred features (no graph memory yet)
+
+**Gaps Identified:**
+- CONTROL Header system not implemented (prose instructions instead)
+- Upload should imply READ_UPLOADS consent (currently asks)
+- Memory concepts mixed (Boot Context vs Session vs User Profile)
+- Capability enum needs expansion (6 capabilities, not 4)
+
+#### Documents Created/Updated
+- **`RemAssist/MODULAR_ORCHESTRATOR_PLAN.md`** - Complete implementation plan
+- **`RemAssist/HARDWARE_SPECS.md`** - Added KV cache quantization docs
+- **`RemAssist/NEXT_TASKS.md`** - Added M1 tasks + alignment tasks
+
+---
+
 ### January 6, 2026 - Stability Fixes + Phinance Context Window (Session 41)
 
 #### Stability Tasks Completed
