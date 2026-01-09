@@ -8,6 +8,8 @@ import time
 import threading
 
 from memory import MemoryClient
+from memory.memory_manager import MemoryManager, MemoryType
+from memory.session_memory import SessionMemory
 from model import ModelClient
 
 # TTS disabled for now
@@ -107,11 +109,25 @@ class SOA1Agent:
                 f"MemLayer health check failed at init (memory disabled): {e}"
             )
 
+        # Memory v0: Typed memory manager (wraps existing MemoryClient for user_profile)
+        backend = self.memory if self._memory_available else None
+        self.memory_manager = MemoryManager(backend=backend)
+        self._sessions: dict[str, SessionMemory] = {}
+
         # Optional: test TTS availability
         if self.tts_enabled:
             logger.info("TTS is disabled in this build")
 
-    # Format memory context (with time awareness)
+    def get_session(self, session_id: str) -> SessionMemory:
+        if session_id not in self._sessions:
+            self._sessions[session_id] = SessionMemory(session_id=session_id)
+        return self._sessions[session_id]
+
+    def clear_session(self, session_id: str) -> None:
+        if session_id in self._sessions:
+            self._sessions[session_id].clear()
+            del self._sessions[session_id]
+
     def _format_memory_context(self, memories: List[Dict[str, Any]]) -> str:
         if not memories:
             return "No relevant past memories were found."
