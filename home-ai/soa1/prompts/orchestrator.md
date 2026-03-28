@@ -1,6 +1,3 @@
-{{SPECIALIST_INSTRUCTIONS}}
-
-
 # Orchestrator System Prompt (Son Of Anton)
 
 ## !! CRITICAL INSTRUCTION !!

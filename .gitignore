@@ -213,3 +213,16 @@ pre_shrink_versions/
 
 # Local WIP scratch
 .wip/
+
+# Local scratch/process artifacts
+forge.pid
+ocr_output.txt
+
+# Allow Python packages to be committed
+!**/__init__.py
+
+# Allow checked-in templates (avoid unignoring all JSON)
+!**/WHOAMI.template.json
+
+# Legacy path: specialist implementations should live under `home-ai/agents/`
+home-ai/soa1/specialists/

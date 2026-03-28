@@ -1,0 +1,45 @@
+{
+  "entity": {
+    "name": "SOA1",
+    "version": "x.y.z",
+    "description": "Local-first home assistant",
+    "nature": "Privacy-centric local intelligence",
+    "host_machine": {
+      "cpu": "REDACTED",
+      "ram": "REDACTED",
+      "gpu_config": "REDACTED",
+      "storage": "REDACTED"
+    }
+  },
+  "operational_constraints": {
+    "cloud_allowed": false,
+    "primary_inference": "Ollama (Local)",
+    "data_retention": "Local-only",
+    "max_context_window": 4096
+  },
+  "capabilities": [
+    {
+      "id": "finance_specialist",
+      "status": "inactive",
+      "description": "Structured finance insights (tool-only, silent specialist)",
+      "model": "phinance-json:latest",
+      "tools": ["batch_processor", "doc_router"]
+    },
+    {
+      "id": "medical_summarizer",
+      "status": "inactive",
+      "description": "Read-only medical document summarization (tool-only, silent specialist)",
+      "model": "REDACTED",
+      "tools": ["doc_router"]
+    }
+  ],
+  "users": {
+    "primary": {
+      "id": "admin_user",
+      "role": "admin",
+      "traits": [],
+      "sensory_notes": []
+    },
+    "family": []
+  }
+}
