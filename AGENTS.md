@@ -79,6 +79,11 @@ After every session/compaction, update:
 1. **`RemAssist/History.md`** — What was accomplished, decisions made
 2. **`RemAssist/NEXT_TASKS.md`** — Mark done, add new tasks
 
+### Update Frequency Rule (Mandatory)
+
+- ALWAYS update `RemAssist/History.md` and `RemAssist/NEXT_TASKS.md` after every **2–3 completed tasks**, even if the session is not “done” yet.
+- If a task is blocked or deferred, record it immediately in `RemAssist/NEXT_TASKS.md` (do not wait for the end of the session).
+
 ---
 
 ## 🐛 Error Tracking
@@ -107,3 +112,11 @@ Log errors to `RemAssist/errors.md`:
 - Do NOT optimize away consent
 - Do NOT relax enforcement for "UX smoothness"
 - **MUST check `HARDWARE_SPECS.md`** before adding models/GPU features
+
+---
+
+## 📍 Current Status (2026-03-28)
+
+- Planning consolidated under `plan/future-plans/feb/` (merged modular plan + addenda + critique).
+- Roadmap for “robust chat agent + two tools (finance + medical)” captured in `plan/future-plans/feb/ROBUST_CHAT_AGENT_TWO_TOOLS_PLAN.md` and `plan/future-plans/feb/NEXT_IMPLEMENTATION_ROADMAP.md`.
+- Specialist routing scaffold exists under `home-ai/soa1/specialist/` (not fully wired into the main chat path yet).
