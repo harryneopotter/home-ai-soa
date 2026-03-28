@@ -20,7 +20,7 @@
 
 1. **`RemAssist/IMPLEMENTATION_GUIDE.md`** — Core invariants
    - User agency is paramount
-   - NO specialist invocation without explicit consent
+   - SOA Orchestrator (`home-ai/soa1`) MUST NOT invoke specialists without explicit consent (see `IMPLEMENTATION_GUIDE.md`)
    - Silence ≠ consent, Upload ≠ consent
 
 2. **`RemAssist/LLM_DRIVEN_RESPONSES.md`** — Communication principle

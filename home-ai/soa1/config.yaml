@@ -25,6 +25,9 @@ orchestrator:
   # System prompt loaded from prompts/orchestrator.md (model-agnostic)
   # To override: set prompt_file: "path/to/custom.md"
 
+features:
+  use_specialist_router: false
+
 specialists:
   finance:
     enabled: true
