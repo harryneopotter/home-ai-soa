@@ -1,7 +1,7 @@
 # 📋 RemAssist — Unified Task Queue
 *Supersedes previous `next-tasks.md` and `NEXT_TASKS.md`. All queues now live here.*
 
-_Last updated: January 8, 2026 (Session 41 - Kernel Alignment Review Complete)_
+_Last updated: March 28, 2026 (Planning + Robust Chat Agent Roadmap)_
 
 ---
 
@@ -27,6 +27,29 @@ _Last updated: January 8, 2026 (Session 41 - Kernel Alignment Review Complete)_
 ---
 
 ## 🚀 Immediate Priority Tasks
+
+### M3. Robust Main Chat Agent + Two Tools (Finance + Medical) [PRIORITY: HIGH]
+**Plan Docs**:
+- `plan/future-plans/feb/ROBUST_CHAT_AGENT_TWO_TOOLS_PLAN.md`
+- `plan/future-plans/feb/MODULAR_AGENT_IMPLEMENTATION_PLAN.md`
+
+**Goal**: main chat agent is system-aware + user/family-aware and can safely invoke:
+- Finance tool (Phinance) behind explicit consent + CONTROL allowlist
+- Medical summarizer tool (read-only) behind CONTROL allowlist
+
+**Implementation Tasks**
+- [ ] Implement kernel identity + user/family context and inject into chat prompt
+- [ ] Wire `user_id` through API entrypoints; set kernel context per request
+- [ ] Remove hardcoded `[INVOKE:phinance]` auto-invoke + keyword fallback in `agent.py`
+- [ ] Fix specialist discovery: load specialists from `home-ai/agents/` (not `home-ai/soa1/specialists/`)
+- [ ] Add medical summarizer specialist (silent, structured output only)
+- [ ] Add per-agent configs (finance ctx=4096, medical ctx configurable)
+- [ ] Add smoke verification: no pre-consent specialist invocation, no persistence without consent
+
+**Done in planning/scaffold (Mar 28, 2026)**
+- [x] Added specialist routing scaffold `home-ai/soa1/specialist/`
+- [x] Added `home-ai/soa1/prompts/fragments/finance.md`
+- [x] Added `plan/future-plans/feb/WHOAMI.template.json` and tightened `.gitignore`
 
 ### 0. Fix Phinance Prompt Schema Mismatch ✅ RESOLVED (Session 35)
 **Problem**: System prompt (Modelfile) and user prompt had conflicting schemas
@@ -157,9 +180,9 @@ Phinance (generate) → NemoAgent (validate) → if fail → Phinance retry with
 - [ ] Integration tests for router + consent flow
 
 #### Phase 3: Dynamic Prompts (Days 7-9)
-- [ ] Create `prompts/fragments/finance.md` - Finance-specific prompt fragment
-- [ ] Modify `orchestrator.md` with `{{SPECIALIST_INSTRUCTIONS}}` placeholder
-- [ ] Update `_load_system_prompt()` with injection logic
+- [x] Create `prompts/fragments/finance.md` - Finance-specific prompt fragment
+- [x] Modify `orchestrator.md` with `{{SPECIALIST_INSTRUCTIONS}}` placeholder (superseded: removed; placeholder was literal)
+- [ ] Update `_load_system_prompt()` with injection logic (no inline templating; safe fragment injection only)
 - [ ] Remove hardcoded finance keywords from `_infer_intent()`
 - [ ] E2E tests with dynamic prompts
 

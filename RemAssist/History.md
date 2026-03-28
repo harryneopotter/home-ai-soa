@@ -1,3 +1,31 @@
+### March 28, 2026 - Robust Chat Agent Roadmap + Modular Plan Consolidation
+
+#### Goal
+Consolidate the modular multi-agent plan into a single, actionable roadmap and prep the repo for implementing a robust main chat agent with two tools (Finance + Medical) without breaking consent/CONTROL rules.
+
+#### Work Completed ✅
+- Created/updated Feb planning docs under `plan/future-plans/feb/`:
+  - `MODULAR_AGENT_IMPLEMENTATION_PLAN.md` (merged with missing-parts addendum content)
+  - `ROBUST_CHAT_AGENT_TWO_TOOLS_PLAN.md` (file-by-file tasks + minimal safe patch set + detailed steps)
+  - Preserved critique + addendum docs as references
+- Added initial specialist routing scaffold under `home-ai/soa1/specialist/` (router/registry/consent manager + base classes).
+- Added finance prompt fragment `home-ai/soa1/prompts/fragments/finance.md`.
+- Tightened `.gitignore`:
+  - Ignore local scratch artifacts (`forge.pid`, `ocr_output.txt`)
+  - Allow committing `__init__.py` files (`!**/__init__.py`)
+  - Add `WHOAMI.template.json` template allowlist
+  - Ignore legacy `home-ai/soa1/specialists/` path (specialists should live under `home-ai/agents/`)
+- Removed literal `{{SPECIALIST_INSTRUCTIONS}}` placeholder from `home-ai/soa1/prompts/orchestrator.md` (no templating currently injects it).
+- Added `plan/future-plans/feb/WHOAMI.template.json` to track a safe manifest template without committing private per-machine details.
+
+#### Branch / Commits
+- Pushed planning/scaffold updates on `docs/project-guidemap`:
+  - `6a21a73` docs: add modular roadmap and specialist routing scaffold
+  - `7a44bcf` chore: tighten gitignore and add WHOAMI template
+- Created new working branch for implementation: `feature/robust-chat-two-tools` (not pushed yet).
+
+---
+
 ### January 9, 2026 - M2 Memory v0 Complete (Session 42 Continued)
 
 #### Goal
