@@ -8,6 +8,7 @@ import time
 import threading
 
 from memory import MemoryClient
+from kernel import kernel
 from memory.memory_manager import MemoryManager, MemoryType
 from memory.session_memory import SessionMemory
 from model import ModelClient
@@ -117,6 +118,12 @@ class SOA1Agent:
         # Optional: test TTS availability
         if self.tts_enabled:
             logger.info("TTS is disabled in this build")
+
+    def _current_system_prompt(self) -> str:
+        identity_prompt = kernel.get_identity_prompt()
+        if not identity_prompt:
+            return self.system_prompt
+        return f"{identity_prompt}\n\n{self.system_prompt}"
 
     def get_session(self, session_id: str) -> SessionMemory:
         if session_id not in self._sessions:
@@ -501,7 +508,7 @@ class SOA1Agent:
         convo = [{"role": "user", "content": prompt}]
 
         try:
-            response = self.model.chat(self.system_prompt, convo)
+            response = self.model.chat(self._current_system_prompt(), convo)
             try:
                 start = response.find("{")
                 end = response.rfind("}") + 1
@@ -665,7 +672,7 @@ class SOA1Agent:
 
         # 4. Model inference
         try:
-            answer = self.model.chat(self.system_prompt, convo)
+            answer = self.model.chat(self._current_system_prompt(), convo)
         except Exception as e:
             logger.error(f"Model call failed: {e}")
             raise ServiceError("model", f"Model inference failed: {str(e)}")
@@ -849,7 +856,7 @@ class SOA1Agent:
         convo.append({"role": "user", "content": "\n\n".join(content_parts)})
 
         try:
-            for chunk in self.model.chat_stream(self.system_prompt, convo):
+            for chunk in self.model.chat_stream(self._current_system_prompt(), convo):
                 yield chunk
         except Exception as e:
             logger.error(f"Streaming model call failed: {e}")

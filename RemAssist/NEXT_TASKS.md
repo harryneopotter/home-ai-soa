@@ -46,6 +46,12 @@ _Last updated: March 28, 2026 (Planning + Robust Chat Agent Roadmap)_
 - [ ] Add per-agent configs (finance ctx=4096, medical ctx configurable)
 - [ ] Add smoke verification: no pre-consent specialist invocation, no persistence without consent
 
+**Progress (Mar 28, 2026)**
+- Added `home-ai/soa1/kernel.py` with identity + user context handling.
+- Wired `_get_user_id()` and `kernel.set_user_context()` into `/api/chat` and `/api/chat/stream`.
+- Injected kernel identity prompt into `home-ai/soa1/agent.py`.
+- Updated MemLayer client to use kernel-scoped user context.
+
 **Done in planning/scaffold (Mar 28, 2026)**
 - [x] Added specialist routing scaffold `home-ai/soa1/specialist/`
 - [x] Added `home-ai/soa1/prompts/fragments/finance.md`

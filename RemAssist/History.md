@@ -1,3 +1,24 @@
+### March 28, 2026 - Kernel Bootstrap + API User Context (M3 Start)
+
+#### Goal
+Begin Milestone 1 for the robust chat agent: introduce kernel identity context and wire user_id into request handling.
+
+#### Work Completed ✅
+- Added `home-ai/soa1/kernel.py`:
+  - Loads WHOAMI manifest with fallbacks
+  - Tracks active user context and vault path
+  - Builds identity prompt including system + user/family info
+- Updated `home-ai/soa1/api.py`:
+  - Added `_get_user_id()` helper (uses `X-User-ID`, falls back to session_id)
+  - Set kernel context at the start of `/api/chat` and `/api/chat/stream`
+- Updated `home-ai/soa1/agent.py`:
+  - Injects kernel identity prompt into the system prompt for chat calls
+- Updated `home-ai/soa1/memory/client.py`:
+  - Uses kernel active user context for MemLayer read/write
+  - Blocks memory access if no active user is set
+
+---
+
 ### March 28, 2026 - Robust Chat Agent Roadmap + Modular Plan Consolidation
 
 #### Goal

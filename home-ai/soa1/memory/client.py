@@ -2,7 +2,9 @@ import requests
 from typing import List, Dict, Any, Optional
 import yaml
 from tenacity import retry, wait_exponential, stop_after_attempt
-import os, pathlib
+import os
+
+from kernel import kernel
 
 from utils.logger import get_logger
 
@@ -16,14 +18,17 @@ class MemoryClient:
             cfg = yaml.safe_load(f)
 
         self.base_url: str = cfg["memlayer"]["base_url"].rstrip("/")
-        self.user_id: str = cfg["memlayer"]["user_id"]
-        self.profile_id: str = cfg["memlayer"]["profile_id"]
         self.top_k: int = int(cfg["memlayer"].get("top_k", 5))
 
         logger.info(
-            f"MemLayer client initialized at {self.base_url} "
-            f"for user={self.user_id}, profile={self.profile_id}"
+            "MemLayer client initialized at %s (user from kernel context)",
+            self.base_url,
         )
+
+    def _get_context(self) -> Dict[str, str]:
+        if not kernel.active_user:
+            raise PermissionError("Memory access requires an active user context")
+        return {"user_id": kernel.active_user.user_id, "profile_id": "main"}
 
     @retry(wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
            stop=stop_after_attempt(3))
@@ -39,9 +44,10 @@ class MemoryClient:
            stop=stop_after_attempt(3))
     def write_memory(self, text: str,
                      metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        ctx = self._get_context()
         payload: Dict[str, Any] = {
-            "user_id": self.user_id,
-            "profile_id": self.profile_id,
+            "user_id": ctx["user_id"],
+            "profile_id": ctx["profile_id"],
             "text": text,
         }
         if metadata:
@@ -60,9 +66,10 @@ class MemoryClient:
     def search_memory(self, query: str,
                       top_k: Optional[int] = None) -> List[Dict[str, Any]]:
         k = top_k or self.top_k
+        ctx = self._get_context()
         payload = {
-            "user_id": self.user_id,
-            "profile_id": self.profile_id,
+            "user_id": ctx["user_id"],
+            "profile_id": ctx["profile_id"],
             "query": query,
             "top_k": k,
         }
@@ -80,4 +87,3 @@ class MemoryClient:
 
         logger.info(f"Memory search returned {len(results)} items")
         return results
-

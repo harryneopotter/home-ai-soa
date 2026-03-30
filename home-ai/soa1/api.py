@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 from agent import SOA1Agent
+from kernel import kernel
 from pdf_processor import pdf_processor
 from batch_processor import batch_processor
 from output_generator import output_generator
@@ -90,6 +91,16 @@ def _get_session_id(request: Request) -> str:
     if not session_id:
         session_id = request.client.host
     return session_id
+
+
+def _get_user_id(request: Request, session_id: Optional[str] = None) -> str:
+    user_id = request.headers.get("X-User-ID")
+    if user_id:
+        return user_id
+
+    fallback = session_id or _get_session_id(request)
+    logger.warning("X-User-ID missing; falling back to session_id=%s", fallback)
+    return fallback
 
 
 def _get_pending_document_context(session_id: str) -> Optional[Dict[str, Any]]:
@@ -292,6 +303,8 @@ def create_app() -> FastAPI:
         """Chat endpoint for WebUI - simple message in, response out"""
         client_ip = request.client.host
         session_id = _get_session_id(request)
+        user_id = _get_user_id(request, session_id)
+        kernel.set_user_context(user_id)
         logger.info(
             f"[{client_ip}] /api/chat called with message: {req.message[:50]}..."
         )
@@ -352,6 +365,8 @@ def create_app() -> FastAPI:
         """Streaming chat endpoint - returns SSE stream of chunks"""
         client_ip = request.client.host
         session_id = _get_session_id(request)
+        user_id = _get_user_id(request, session_id)
+        kernel.set_user_context(user_id)
         logger.info(
             f"[{client_ip}] /api/chat/stream called with message: {req.message[:50]}..."
         )
